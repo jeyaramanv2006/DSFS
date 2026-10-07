@@ -89,6 +89,10 @@ export function buildServer(store: IStorageNode): FastifyInstance {
     }
   });
 
+  app.get('/chunks', async (_request, reply) => {
+    return reply.code(200).send({ chunks: await store.listChunks() });
+  });
+
   app.get('/health', async (_request, reply) => {
     const report = await store.healthCheck();
     return reply.code(200).send(report);

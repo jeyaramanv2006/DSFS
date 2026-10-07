@@ -47,6 +47,10 @@ describe('storage node HTTP server', () => {
     expect(get.headers['content-type']).toContain('application/octet-stream');
     expect(get.body).toBe(content);
 
+    const listing = await app.inject({ method: 'GET', url: '/chunks' });
+    expect(listing.statusCode).toBe(200);
+    expect(listing.json()).toEqual({ chunks: ['abc123'] });
+
     const health = await app.inject({ method: 'GET', url: '/health' });
     expect(health.statusCode).toBe(200);
     expect(health.json()).toMatchObject({
