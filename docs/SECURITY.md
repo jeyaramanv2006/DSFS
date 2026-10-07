@@ -89,3 +89,10 @@ To prevent accidental privacy leaks in production logs, the following rules are 
 ✔ Chunk Size (bytes) & Network Latency (ms)
 ✔ Categorized Error Codes (e.g., ERR_NODE_TIMEOUT)
 ```
+
+## 6. Release Hardening Controls
+
+- Fastify uses Pino redaction for authorization headers and token-shaped request/response fields. Secret values are never intentionally logged.
+- Transfer initialization, upload/status/finalize, access, download, and completion routes use separate process-local rate-limit buckets. A horizontally scaled deployment must replace these counters with a shared store.
+- The release gate runs `npm audit`, the full Vitest suite, all workspace builds, and `git diff --check` against the committed lockfile.
+- The clean-clone demo starts the three storage nodes, the API, and the Vite client; browser verification confirms the share secret remains in the fragment and never enters a request URL.

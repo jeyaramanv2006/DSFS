@@ -41,3 +41,11 @@ This document logs identified technical, security, operational, and architectura
 | :--- | :--- | :--- | :--- | :--- |
 | **RSK-ENG-01** | **"Buzzword Architecture" Overhead**<br>Implementing complex distributed algorithms (Raft, Paxos) that add maintenance burden without practical application need. | Medium | Medium | Adhere to Section 44/88: Every mechanism must directly solve an identified application requirement (placement, failover, TTL cleanup, concurrency). |
 | **RSK-ENG-02** | **Regression of Existing Frontend/Backend**<br>Rewriting functional code while attempting to add distributed features. | Medium | High | Follow Section 62/63: Map existing routes and UI first; build distributed node abstractions incrementally around existing modules. |
+
+## 5. Phase 13 Release Risks
+
+| Risk ID | Description & Impact | Probability | Severity | Mitigation Strategy |
+| :--- | :--- | :--- | :--- | :--- |
+| **RSK-SEC-05** | **Credential leakage through structured request logs**<br>Authorization headers or one-time tokens could be copied into operational logs. | Low | Critical | Pino redaction removes authorization and token-shaped request/response fields; regression tests lock the redaction paths. |
+| **RSK-OPS-03** | **Rate-limit divergence across API instances**<br>Process-local counters permit multiplied request budgets when horizontally scaled. | Medium | Medium | Document the limitation and require a shared limiter store before multi-instance deployment. |
+| **RSK-OPS-04** | **Release dependency drift**<br>Installing from an uncommitted or changing dependency graph can reintroduce vulnerable packages. | Low | High | Release from `package-lock.json` with `npm ci`, run native `npm audit`, and review audit exceptions before shipping. |
