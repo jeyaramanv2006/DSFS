@@ -95,4 +95,35 @@ describe('metadata database migrations', () => {
     expect(database.inspectAccess(created.fileId, hashToken(authToken), new Date('2026-10-07T00:00:00.000Z'))).toBe('GONE');
     database.close();
   });
+
+  it('claims expired transfers but protects an active download lease', () => {
+    const database = new MetadataDatabase();
+    const protectedTransfer = database.createTransfer({ authToken: '99'.repeat(32), totalSizeBytes: 1, chunkCount: 1, chunkSizeBytes: 1, encryptedFileName: null, ttlSeconds: 600, maxDownloads: 1 });
+    const expiredTransfer = database.createTransfer({ authToken: 'aa'.repeat(32), totalSizeBytes: 1, chunkCount: 1, chunkSizeBytes: 1, encryptedFileName: null, ttlSeconds: 600, maxDownloads: 1 });
+    database.db.prepare(`UPDATE transfers SET status = 'DOWNLOADING', expires_at = '2026-10-07T09:00:00.000Z', download_lease_until = '2026-10-07T10:30:00.000Z', created_at = '2026-10-07T08:00:00.000Z' WHERE file_id = ?`).run(protectedTransfer.fileId);
+    database.db.prepare(`UPDATE transfers SET status = 'READY', expires_at = '2026-10-07T09:00:00.000Z', created_at = '2026-10-07T08:00:00.000Z' WHERE file_id = ?`).run(expiredTransfer.fileId);
+    const claimed = database.claimDeletableTransfers(new Date('2026-10-07T10:00:00.000Z'));
+    expect(claimed.map((transfer) => transfer.file_id)).toEqual([expiredTransfer.fileId]);
+    expect(database.getTransfer(protectedTransfer.fileId)?.status).toBe('DOWNLOADING');
+    expect(database.getTransfer(expiredTransfer.fileId)?.status).toBe('DELETING');
+    database.close();
+  });
+
+  it('finalizes deletion only after every replica is confirmed deleted', () => {
+    const database = new MetadataDatabase();
+    database.registerStorageNode({ nodeId: 'node-a', endpointUrl: 'http://node-a', status: 'HEALTHY' });
+    database.registerStorageNode({ nodeId: 'node-b', endpointUrl: 'http://node-b', status: 'HEALTHY' });
+    const transfer = database.createTransfer({ authToken: 'bb'.repeat(32), totalSizeBytes: 1, chunkCount: 1, chunkSizeBytes: 1, encryptedFileName: null, ttlSeconds: 600, maxDownloads: 1 });
+    const chunkId = `${transfer.fileId}-0`;
+    database.db.prepare(`INSERT INTO chunks (chunk_id, file_id, chunk_index, size_bytes, checksum_sha256, status) VALUES (?, ?, 0, 1, ?, 'STORED')`).run(chunkId, transfer.fileId, 'a'.repeat(64));
+    database.recordConfirmedReplicas(chunkId, ['node-a', 'node-b']);
+    database.db.prepare("UPDATE transfers SET status = 'DELETING' WHERE file_id = ?").run(transfer.fileId);
+    database.markReplicaDeleted(chunkId, 'node-a');
+    expect(database.finalizeTransferDeletion(transfer.fileId)).toBe(false);
+    database.markReplicaDeleted(chunkId, 'node-b');
+    expect(database.finalizeTransferDeletion(transfer.fileId)).toBe(true);
+    expect(database.getTransfer(transfer.fileId)?.status).toBe('DELETED');
+    expect(database.getStoredChunks(transfer.fileId)).toEqual([]);
+    database.close();
+  });
 });

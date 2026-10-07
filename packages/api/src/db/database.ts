@@ -57,6 +57,11 @@ export interface StorageNodeRecord {
   last_heartbeat: string;
 }
 
+export interface DeletionChunk {
+  chunk_id: string;
+  replicas: Array<{ node_id: string; status: string }>;
+}
+
 const DEFAULT_SCHEMA_PATH = fileURLToPath(new URL('./schema.sql', import.meta.url));
 
 function hashesEqual(left: string, right: string): boolean {
@@ -251,6 +256,88 @@ export class MetadataDatabase {
       SELECT node_id, status FROM chunk_replicas
       WHERE chunk_id = ? ORDER BY rowid
     `).all(chunkId) as Array<{ node_id: string; status: string }>;
+  }
+
+  public claimDeletableTransfers(now = new Date(), staleUploadMs = 30 * 60_000): TransferRow[] {
+    const nowIso = now.toISOString();
+    const staleBefore = new Date(now.getTime() - staleUploadMs).toISOString();
+    return this.db.transaction(() => {
+      const candidates = this.db.prepare(`
+        SELECT * FROM transfers
+        WHERE (
+          (expires_at <= ? AND status IN ('READY', 'DOWNLOADING', 'EXPIRED', 'CONSUMED'))
+          OR status IN ('CONSUMED', 'DELETING')
+          OR (status IN ('CREATING', 'UPLOADING', 'FAILED') AND created_at <= ?)
+        )
+        AND NOT (status = 'DOWNLOADING' AND download_lease_until > ?)
+      `).all(nowIso, staleBefore, nowIso) as TransferRow[];
+      const claim = this.db.prepare(`
+        UPDATE transfers
+        SET status = 'DELETING', download_token_hash = NULL,
+            download_token_expires_at = NULL, download_lease_until = NULL
+        WHERE file_id = ?
+      `);
+      candidates.forEach((transfer) => claim.run(transfer.file_id));
+      return candidates.map((transfer) => ({ ...transfer, status: 'DELETING' }));
+    })();
+  }
+
+  public getDeletionChunks(fileId: string): DeletionChunk[] {
+    const rows = this.db.prepare(`
+      SELECT c.chunk_id, r.node_id, r.status AS replica_status
+      FROM chunks c LEFT JOIN chunk_replicas r ON r.chunk_id = c.chunk_id
+      WHERE c.file_id = ? AND c.status IN ('STORED', 'PENDING')
+      ORDER BY c.chunk_id, r.rowid
+    `).all(fileId) as Array<{ chunk_id: string; node_id: string | null; replica_status: string | null }>;
+    const chunks = new Map<string, DeletionChunk>();
+    for (const row of rows) {
+      const chunk = chunks.get(row.chunk_id) ?? { chunk_id: row.chunk_id, replicas: [] };
+      if (row.node_id && row.replica_status) chunk.replicas.push({ node_id: row.node_id, status: row.replica_status });
+      chunks.set(row.chunk_id, chunk);
+    }
+    return [...chunks.values()];
+  }
+
+  public markReplicaDeleted(chunkId: string, nodeId: string): void {
+    this.db.prepare(`
+      UPDATE chunk_replicas SET status = 'DELETED'
+      WHERE chunk_id = ? AND node_id = ?
+    `).run(chunkId, nodeId);
+  }
+
+  public markReplicaOrphanedPendingDelete(chunkId: string, nodeId: string): void {
+    this.db.prepare(`
+      UPDATE chunk_replicas SET status = 'ORPHANED_PENDING_DELETE'
+      WHERE chunk_id = ? AND node_id = ?
+    `).run(chunkId, nodeId);
+  }
+
+  public finalizeTransferDeletion(fileId: string): boolean {
+    return this.db.transaction(() => {
+      const pending = this.db.prepare(`
+        SELECT COUNT(*) FROM chunk_replicas r
+        JOIN chunks c ON c.chunk_id = r.chunk_id
+        WHERE c.file_id = ? AND r.status NOT IN ('DELETED')
+      `).pluck().get(fileId) as number;
+      if (pending !== 0) return false;
+      this.db.prepare("UPDATE chunks SET status = 'DELETED' WHERE file_id = ?").run(fileId);
+      const result = this.db.prepare(`
+        UPDATE transfers SET status = 'DELETED', download_token_hash = NULL,
+          download_token_expires_at = NULL, download_lease_until = NULL
+        WHERE file_id = ? AND status = 'DELETING'
+      `).run(fileId);
+      return result.changes === 1;
+    })();
+  }
+
+  public getActiveChunkIdsForNode(nodeId: string): string[] {
+    return this.db.prepare(`
+      SELECT r.chunk_id FROM chunk_replicas r
+      JOIN chunks c ON c.chunk_id = r.chunk_id
+      JOIN transfers t ON t.file_id = c.file_id
+      WHERE r.node_id = ? AND r.status = 'ACTIVE' AND c.status = 'STORED'
+        AND t.status NOT IN ('DELETING', 'DELETED', 'EXPIRED', 'CONSUMED')
+    `).pluck().all(nodeId) as string[];
   }
 
   public getRecoveryCandidates(replicationFactor = 2): Array<{
