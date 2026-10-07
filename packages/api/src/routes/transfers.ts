@@ -5,6 +5,7 @@ import type { StorageNodeClient } from '../services/storage-client.js';
 import { hashToken, isTokenHex } from '../services/tokens.js';
 import type { ChunkReplicator } from '../replication/replication.js';
 import { NodeUnavailableError, type ReplicaReadService } from '../replication/read-service.js';
+import { RouteRateLimiter, rateLimit } from '../hardening/rate-limit.js';
 
 const MAX_FILE_SIZE_BYTES = 200 * 1024 * 1024;
 const DEFAULT_CHUNK_SIZE_BYTES = 4 * 1024 * 1024;
@@ -88,8 +89,9 @@ export function registerTransferRoutes(
   storageClient: StorageNodeClient,
   replicator?: ChunkReplicator,
   readService?: Pick<ReplicaReadService, 'getChunk'>,
+  limiter = new RouteRateLimiter(),
 ): void {
-  app.post<{ Body: Partial<InitBody> }>('/api/transfers', async (request, reply) => {
+  app.post<{ Body: Partial<InitBody> }>('/api/transfers', { preHandler: rateLimit(limiter, 'init') }, async (request, reply) => {
     try {
       validateInitBody(request.body ?? {});
       const chunkSizeBytes = request.body.chunkSizeBytes ?? DEFAULT_CHUNK_SIZE_BYTES;
@@ -121,7 +123,7 @@ export function registerTransferRoutes(
     }
   });
 
-  app.put<{ Params: ChunkParams }>('/api/transfers/:fileId/chunks/:index', async (request, reply) => {
+  app.put<{ Params: ChunkParams }>('/api/transfers/:fileId/chunks/:index', { preHandler: rateLimit(limiter, 'upload') }, async (request, reply) => {
     const transfer = database.getTransfer(request.params.fileId);
     const token = bearerToken(request.headers.authorization);
     const providedHash = token ? hashToken(token) : undefined;
@@ -170,6 +172,7 @@ export function registerTransferRoutes(
 
   app.post<{ Params: FinalizeParams; Body: FinalizeBody }>(
     '/api/transfers/:fileId/finalize',
+    { preHandler: rateLimit(limiter, 'upload') },
     async (request, reply) => {
       const transfer = database.getTransfer(request.params.fileId);
       const token = bearerToken(request.headers.authorization);
@@ -194,7 +197,7 @@ export function registerTransferRoutes(
     },
   );
 
-  app.get<{ Params: StatusParams }>('/api/transfers/:fileId/status', async (request, reply) => {
+  app.get<{ Params: StatusParams }>('/api/transfers/:fileId/status', { preHandler: rateLimit(limiter, 'upload') }, async (request, reply) => {
     const transfer = database.getTransfer(request.params.fileId);
     const token = bearerToken(request.headers.authorization);
     const providedHash = token ? hashToken(token) : undefined;
@@ -218,7 +221,7 @@ export function registerTransferRoutes(
     });
   });
 
-  app.post<{ Params: AccessParams }>('/api/transfers/:fileId/access', async (request, reply) => {
+  app.post<{ Params: AccessParams }>('/api/transfers/:fileId/access', { preHandler: rateLimit(limiter, 'access') }, async (request, reply) => {
     const token = bearerToken(request.headers.authorization);
     const inspection = token
       ? database.inspectAccess(request.params.fileId, hashToken(token))
@@ -247,6 +250,7 @@ export function registerTransferRoutes(
 
   app.get<{ Params: DownloadChunkParams }>(
     '/api/transfers/:fileId/chunks/:index',
+    { preHandler: rateLimit(limiter, 'download') },
     async (request, reply) => {
       const transfer = database.getTransfer(request.params.fileId);
       const token = bearerToken(request.headers.authorization);
@@ -273,7 +277,7 @@ export function registerTransferRoutes(
     },
   );
 
-  app.post<{ Params: AccessParams }>('/api/transfers/:fileId/complete', async (request, reply) => {
+  app.post<{ Params: AccessParams }>('/api/transfers/:fileId/complete', { preHandler: rateLimit(limiter, 'download') }, async (request, reply) => {
     const token = bearerToken(request.headers.authorization);
     const completed = token
       ? database.completeDownload(request.params.fileId, hashToken(token))
