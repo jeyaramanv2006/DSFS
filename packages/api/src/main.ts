@@ -5,6 +5,7 @@ import { buildApiServer } from './server.js';
 import { PlacementService } from './placement/service.js';
 import { ReplicationService } from './replication/replication.js';
 import { HttpStorageNodeClient } from './services/storage-client.js';
+import { ReplicaReadService } from './replication/read-service.js';
 
 const databasePath = process.env.DB_PATH ?? './data/api.db';
 await mkdir(dirname(databasePath), { recursive: true });
@@ -21,7 +22,16 @@ const replicator = new ReplicationService(
   new PlacementService(database),
   nodeDefinitions.map(([nodeId, endpoint]) => ({ nodeId, client: new HttpStorageNodeClient(endpoint) })),
 );
-const app = buildApiServer(database, new HttpStorageNodeClient(nodeDefinitions[0]?.[1] ?? 'http://localhost:9001'), replicator);
+const nodeTargets = nodeDefinitions.map(([nodeId, endpoint]) => ({
+  nodeId,
+  client: new HttpStorageNodeClient(endpoint),
+}));
+const app = buildApiServer(
+  database,
+  nodeTargets[0]?.client ?? new HttpStorageNodeClient('http://localhost:9001'),
+  replicator,
+  new ReplicaReadService(database, nodeTargets),
+);
 
 try {
   await app.listen({

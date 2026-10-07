@@ -4,6 +4,7 @@ import { MetadataDatabase } from '../db/database.js';
 import type { StorageNodeClient } from '../services/storage-client.js';
 import { hashToken, isTokenHex } from '../services/tokens.js';
 import type { ChunkReplicator } from '../replication/replication.js';
+import { NodeUnavailableError, type ReplicaReadService } from '../replication/read-service.js';
 
 const MAX_FILE_SIZE_BYTES = 200 * 1024 * 1024;
 const DEFAULT_CHUNK_SIZE_BYTES = 4 * 1024 * 1024;
@@ -86,6 +87,7 @@ export function registerTransferRoutes(
   database: MetadataDatabase,
   storageClient: StorageNodeClient,
   replicator?: ChunkReplicator,
+  readService?: Pick<ReplicaReadService, 'getChunk'>,
 ): void {
   app.post<{ Body: Partial<InitBody> }>('/api/transfers', async (request, reply) => {
     try {
@@ -255,9 +257,12 @@ export function registerTransferRoutes(
         return reply.code(404).send({ error: 'TRANSFER_NOT_FOUND' });
       }
       try {
-        const stream = await storageClient.getChunk(`${request.params.fileId}-${chunkIndex}`);
+        const stream = await (readService ?? storageClient).getChunk(`${request.params.fileId}-${chunkIndex}`);
         return reply.type('application/octet-stream').send(stream);
-      } catch {
+      } catch (error) {
+        if (error instanceof NodeUnavailableError) {
+          return reply.code(503).send({ error: error.code });
+        }
         return reply.code(502).send({ error: 'CHUNK_UNAVAILABLE' });
       }
     },

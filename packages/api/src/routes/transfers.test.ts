@@ -4,6 +4,7 @@ import { Readable } from 'node:stream';
 import { MetadataDatabase } from '../db/database.js';
 import { buildApiServer } from '../server.js';
 import type { StorageNodeClient, StoredChunkResult } from '../services/storage-client.js';
+import { NodeUnavailableError } from '../replication/read-service.js';
 
 const authToken = '000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f';
 
@@ -331,5 +332,36 @@ describe('POST /api/transfers', () => {
     expect(invalid.statusCode).toBe(404);
     expect(unknown.statusCode).toBe(404);
     expect(invalid.body).toBe(unknown.body);
+  });
+
+  it('returns typed NODE_UNAVAILABLE after authenticated replica exhaustion', async () => {
+    database = new MetadataDatabase();
+    const storage = new FakeStorageNodeClient();
+    const readService = { getChunk: async () => { throw new NodeUnavailableError(); } };
+    app = buildApiServer(database, storage, undefined, readService);
+    const init = await app.inject({
+      method: 'POST',
+      url: '/api/transfers',
+      payload: { authToken, totalSizeBytes: 5, chunkCount: 1, ttlSeconds: 600 },
+    });
+    const initialized = init.json();
+    const content = Buffer.from('hello');
+    const checksum = createHash('sha256').update(content).digest('hex');
+    const uploadHeaders = {
+      authorization: `Bearer ${initialized.uploadToken}`,
+      'content-type': 'application/octet-stream',
+      'x-chunk-checksum-sha256': checksum,
+    };
+    await app.inject({ method: 'PUT', url: `/api/transfers/${initialized.fileId}/chunks/0`, headers: uploadHeaders, payload: content });
+    await app.inject({ method: 'POST', url: `/api/transfers/${initialized.fileId}/finalize`, headers: { authorization: `Bearer ${initialized.uploadToken}` }, payload: { totalChunksUploaded: 1 } });
+    const access = await app.inject({ method: 'POST', url: `/api/transfers/${initialized.fileId}/access`, headers: { authorization: `Bearer ${authToken}` } });
+    const downloadToken = access.json().downloadToken;
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/transfers/${initialized.fileId}/chunks/0`,
+      headers: { authorization: `Bearer ${downloadToken}` },
+    });
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toEqual({ error: 'NODE_UNAVAILABLE' });
   });
 });
