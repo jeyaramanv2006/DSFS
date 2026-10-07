@@ -334,6 +334,19 @@ describe('POST /api/transfers', () => {
     expect(invalid.body).toBe(unknown.body);
   });
 
+  it('returns 404 for invalid capability but 410 for a valid consumed transfer', async () => {
+    database = new MetadataDatabase();
+    app = buildApiServer(database, new FakeStorageNodeClient());
+    const init = await app.inject({ method: 'POST', url: '/api/transfers', payload: { authToken, totalSizeBytes: 5, chunkCount: 1, ttlSeconds: 600 } });
+    const initialized = init.json();
+    database.db.prepare("UPDATE transfers SET status = 'CONSUMED' WHERE file_id = ?").run(initialized.fileId);
+    const invalid = await app.inject({ method: 'POST', url: `/api/transfers/${initialized.fileId}/access`, headers: { authorization: `Bearer ${'11'.repeat(32)}` } });
+    const gone = await app.inject({ method: 'POST', url: `/api/transfers/${initialized.fileId}/access`, headers: { authorization: `Bearer ${authToken}` } });
+    expect(invalid.statusCode).toBe(404);
+    expect(gone.statusCode).toBe(410);
+    expect(gone.json()).toEqual({ error: 'TRANSFER_GONE' });
+  });
+
   it('returns typed NODE_UNAVAILABLE after authenticated replica exhaustion', async () => {
     database = new MetadataDatabase();
     const storage = new FakeStorageNodeClient();

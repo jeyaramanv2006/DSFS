@@ -220,7 +220,12 @@ export function registerTransferRoutes(
 
   app.post<{ Params: AccessParams }>('/api/transfers/:fileId/access', async (request, reply) => {
     const token = bearerToken(request.headers.authorization);
-    const lease = token
+    const inspection = token
+      ? database.inspectAccess(request.params.fileId, hashToken(token))
+      : 'INVALID';
+    if (inspection === 'GONE') return reply.code(410).send({ error: 'TRANSFER_GONE' });
+    if (inspection === 'IN_PROGRESS') return reply.code(409).send({ error: 'DOWNLOAD_IN_PROGRESS' });
+    const lease = token && inspection === 'AVAILABLE'
       ? database.acquireDownloadLease(request.params.fileId, hashToken(token))
       : undefined;
     if (!lease) {
