@@ -31,6 +31,8 @@ const app = buildApiServer(
   nodeTargets[0]?.client ?? new HttpStorageNodeClient('http://localhost:9001'),
   replicator,
   new ReplicaReadService(database, nodeTargets),
+  undefined,
+  { logger: true },
 );
 
 try {

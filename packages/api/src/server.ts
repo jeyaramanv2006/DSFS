@@ -23,7 +23,7 @@ export function buildApiServer(
   healthMonitor = new HealthMonitor(database),
   options: ApiServerOptions = {},
 ): FastifyInstance {
-  const app = Fastify({ logger: options.logger === false ? false : createLoggerOptions() });
+  const app = Fastify({ logger: options.logger === true ? createLoggerOptions() : false });
   const resolvedStorageClient = storageClient ?? new HttpStorageNodeClient('http://localhost:9001');
   app.addContentTypeParser(
     'application/octet-stream',
