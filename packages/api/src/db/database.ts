@@ -340,6 +340,13 @@ export class MetadataDatabase {
     `).pluck().all(nodeId) as string[];
   }
 
+  public getPendingDeletionChunkIdsForNode(nodeId: string): string[] {
+    return this.db.prepare(`
+      SELECT chunk_id FROM chunk_replicas
+      WHERE node_id = ? AND status = 'ORPHANED_PENDING_DELETE'
+    `).pluck().all(nodeId) as string[];
+  }
+
   public getRecoveryCandidates(replicationFactor = 2): Array<{
     chunk_id: string;
     size_bytes: number;
