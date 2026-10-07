@@ -251,6 +251,41 @@ export class MetadataDatabase {
     `).all(chunkId) as Array<{ node_id: string; status: string }>;
   }
 
+  public getRecoveryCandidates(replicationFactor = 2): Array<{
+    chunk_id: string;
+    size_bytes: number;
+    checksum_sha256: string;
+    transfer_status: string;
+    active_replica_count: number;
+  }> {
+    return this.db.prepare(`
+      SELECT c.chunk_id, c.size_bytes, c.checksum_sha256,
+             t.status AS transfer_status,
+             COUNT(CASE WHEN r.status = 'ACTIVE' THEN 1 END) AS active_replica_count
+      FROM chunks c
+      JOIN transfers t ON t.file_id = c.file_id
+      LEFT JOIN chunk_replicas r ON r.chunk_id = c.chunk_id
+      WHERE c.status = 'STORED'
+        AND t.status NOT IN ('DELETING', 'EXPIRED', 'DELETED')
+      GROUP BY c.chunk_id
+      HAVING active_replica_count < ?
+      ORDER BY c.chunk_id
+    `).all(replicationFactor) as Array<{
+      chunk_id: string;
+      size_bytes: number;
+      checksum_sha256: string;
+      transfer_status: string;
+      active_replica_count: number;
+    }>;
+  }
+
+  public addConfirmedReplica(chunkId: string, nodeId: string): void {
+    this.db.prepare(`
+      INSERT OR IGNORE INTO chunk_replicas (replica_id, chunk_id, node_id, status)
+      VALUES (?, ?, ?, 'ACTIVE')
+    `).run(createFileId(), chunkId, nodeId);
+  }
+
   public finalizeTransfer(fileId: string): TransferRow | undefined {
     const transfer = this.getTransfer(fileId);
     if (!transfer || this.countStoredChunks(fileId) !== transfer.chunk_count) {
