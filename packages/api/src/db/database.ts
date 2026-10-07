@@ -45,6 +45,8 @@ export interface DownloadLease {
   downloadTokenExpiresAt: string;
 }
 
+export type AccessInspection = 'INVALID' | 'AVAILABLE' | 'IN_PROGRESS' | 'GONE';
+
 export interface StorageNodeRecord {
   node_id: string;
   endpoint_url: string;
@@ -314,20 +316,15 @@ export class MetadataDatabase {
     const leaseUntil = new Date(now.getTime() + 60_000).toISOString();
     const downloadToken = createToken();
     const result = this.db.transaction(() => {
-      const transfer = this.getTransfer(fileId);
-      if (!transfer || !hashesEqual(capabilityHash, transfer.capability_hash) ||
-        transfer.expires_at <= nowIso || transfer.download_count >= transfer.max_downloads ||
-        (transfer.status !== 'READY' &&
-          !(transfer.status === 'DOWNLOADING' &&
-            !!transfer.download_lease_until && transfer.download_lease_until <= nowIso))) {
-        return undefined;
-      }
-      this.db.prepare(`
+      const update = this.db.prepare(`
         UPDATE transfers
         SET status = 'DOWNLOADING', download_token_hash = ?,
             download_token_expires_at = ?, download_lease_until = ?
-        WHERE file_id = ?
-      `).run(hashToken(downloadToken), leaseUntil, leaseUntil, fileId);
+        WHERE file_id = ? AND capability_hash = ? AND expires_at > ?
+          AND download_count < max_downloads
+          AND (status = 'READY' OR (status = 'DOWNLOADING' AND download_lease_until <= ?))
+      `).run(hashToken(downloadToken), leaseUntil, leaseUntil, fileId, capabilityHash, nowIso, nowIso);
+      if (update.changes !== 1) return undefined;
       return { transfer: this.getTransfer(fileId)!, downloadToken, downloadTokenExpiresAt: leaseUntil };
     })();
     return result;
@@ -338,19 +335,33 @@ export class MetadataDatabase {
     return this.db.transaction(() => {
       const transfer = this.getTransfer(fileId);
       if (!transfer || transfer.status !== 'DOWNLOADING' ||
-        transfer.download_token_hash !== tokenHash ||
+        !transfer.download_token_hash || !hashesEqual(transfer.download_token_hash, tokenHash) ||
         !transfer.download_lease_until || transfer.download_lease_until <= nowIso) {
         return undefined;
       }
       const nextCount = transfer.download_count + 1;
-      this.db.prepare(`
+      const update = this.db.prepare(`
         UPDATE transfers
         SET download_count = ?, status = ?, download_token_hash = NULL,
             download_token_expires_at = NULL, download_lease_until = NULL
         WHERE file_id = ? AND status = 'DOWNLOADING' AND download_token_hash = ?
       `).run(nextCount, nextCount >= transfer.max_downloads ? 'CONSUMED' : 'READY', fileId, tokenHash);
+      if (update.changes !== 1) return undefined;
       return this.getTransfer(fileId);
     })();
+  }
+
+  public inspectAccess(fileId: string, capabilityHash: string, now = new Date()): AccessInspection {
+    const transfer = this.getTransfer(fileId);
+    if (!transfer || !hashesEqual(capabilityHash, transfer.capability_hash)) return 'INVALID';
+    const nowIso = now.toISOString();
+    if (transfer.expires_at <= nowIso ||
+      ['EXPIRED', 'CONSUMED', 'DELETING', 'DELETED'].includes(transfer.status) ||
+      transfer.download_count >= transfer.max_downloads) return 'GONE';
+    if (transfer.status === 'DOWNLOADING' && transfer.download_lease_until && transfer.download_lease_until > nowIso) {
+      return 'IN_PROGRESS';
+    }
+    return transfer.status === 'READY' || transfer.status === 'DOWNLOADING' ? 'AVAILABLE' : 'INVALID';
   }
 
   public close(): void {
