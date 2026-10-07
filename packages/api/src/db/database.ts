@@ -177,12 +177,13 @@ export class MetadataDatabase {
     totalCapacityBytes?: number;
     usedCapacityBytes?: number;
     activeOperations?: number;
+    heartbeatAt?: string;
   }): void {
     this.db.prepare(`
       INSERT INTO storage_nodes (
         node_id, endpoint_url, status, total_capacity_bytes,
         used_capacity_bytes, active_operations, last_heartbeat
-      ) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(node_id) DO UPDATE SET
         endpoint_url = excluded.endpoint_url,
         status = excluded.status,
@@ -197,7 +198,12 @@ export class MetadataDatabase {
       input.totalCapacityBytes ?? 0,
       input.usedCapacityBytes ?? 0,
       input.activeOperations ?? 0,
+      input.heartbeatAt ?? new Date().toISOString(),
     );
+  }
+
+  public setNodeStatus(nodeId: string, status: string): void {
+    this.db.prepare('UPDATE storage_nodes SET status = ? WHERE node_id = ?').run(status, nodeId);
   }
 
   public listStorageNodes(status?: string): StorageNodeRecord[] {
