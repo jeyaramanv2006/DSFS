@@ -40,7 +40,7 @@ export class ReplicationService implements ChunkReplicator {
     }
     const targetMap = new Map(this.targets.map((target) => [target.nodeId, target]));
     const candidateIds = this.placement
-      .selectNodes(chunkId, this.targets.length)
+      .selectNodes(chunkId, this.targets.length, payload.byteLength)
       .filter((nodeId) => targetMap.has(nodeId));
     const confirmed: string[] = [];
     const failed: string[] = [];

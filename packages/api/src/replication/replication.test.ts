@@ -54,12 +54,14 @@ describe('replication service', () => {
     const { database, chunkId } = setup();
     const payload = Buffer.from('data');
     const checksum = createHash('sha256').update(payload).digest('hex');
-    const fakes = [new FakeReplica(true), new FakeReplica(), new FakeReplica()];
-    const targets: ReplicaTarget[] = ['node-a', 'node-b', 'node-c'].map((nodeId, index) => ({ nodeId, client: fakes[index] }));
-    const result = await new ReplicationService(database, new PlacementService(database, 32), targets)
+    const placement = new PlacementService(database, 32);
+    const ordered = placement.selectNodes(chunkId, 3);
+    const fakes = new Map(ordered.map((nodeId, index) => [nodeId, new FakeReplica(index === 0)]));
+    const targets: ReplicaTarget[] = ordered.map((nodeId) => ({ nodeId, client: fakes.get(nodeId)! }));
+    const result = await new ReplicationService(database, placement, targets)
       .replicateChunk(chunkId, payload, checksum);
     expect(result.confirmedNodeIds).toHaveLength(2);
-    expect(result.failedNodeIds).toContain('node-a');
+    expect(result.failedNodeIds).toHaveLength(1);
     expect(database.getConfirmedReplicas(chunkId).map((row) => row.node_id)).toEqual(result.confirmedNodeIds);
     database.close();
   });

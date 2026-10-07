@@ -27,4 +27,13 @@ describe('placement service', () => {
     expect(() => new PlacementService(database).placeChunk('chunk-1')).toThrow('no healthy storage nodes');
     database.close();
   });
+
+  it('filters healthy nodes that cannot fit the requested chunk capacity', () => {
+    const database = new MetadataDatabase();
+    database.registerStorageNode({ nodeId: 'small', endpointUrl: 'http://small', status: 'HEALTHY', totalCapacityBytes: 10, usedCapacityBytes: 9 });
+    database.registerStorageNode({ nodeId: 'large', endpointUrl: 'http://large', status: 'HEALTHY', totalCapacityBytes: 100, usedCapacityBytes: 9 });
+    const selected = new PlacementService(database, 32).selectNodes('chunk-capacity', 2, 5);
+    expect(selected).toEqual(['large']);
+    database.close();
+  });
 });
