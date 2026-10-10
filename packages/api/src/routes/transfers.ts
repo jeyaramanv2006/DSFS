@@ -9,7 +9,8 @@ import { RouteRateLimiter, rateLimit } from '../hardening/rate-limit.js';
 
 const MAX_FILE_SIZE_BYTES = 200 * 1024 * 1024;
 const DEFAULT_CHUNK_SIZE_BYTES = 4 * 1024 * 1024;
-const ALLOWED_TTLS = new Set([600, 3600, 86400]);
+const MAX_TTL_SECONDS = 48 * 3600; // 48 Hours maximum
+const ALLOWED_TTLS = new Set([600, 3600, 21600, 43200, 86400, 172800]);
 
 interface InitBody {
   authToken: string;

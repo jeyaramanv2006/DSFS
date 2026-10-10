@@ -98,6 +98,40 @@ describe('POST /api/transfers', () => {
     expect(database.db.prepare('SELECT count(*) AS count FROM transfers').pluck().get()).toBe(0);
   });
 
+  it('enforces maximum 48-hour (172800s) expiration limit', async () => {
+    database = new MetadataDatabase();
+    app = buildApiServer(database);
+
+    // 48 hours (172800s) is accepted
+    const valid48h = await app.inject({
+      method: 'POST',
+      url: '/api/transfers',
+      payload: {
+        authToken,
+        totalSizeBytes: 1024,
+        chunkCount: 1,
+        chunkSizeBytes: 4 * 1024 * 1024,
+        ttlSeconds: 172800,
+        maxDownloads: 5,
+      },
+    });
+    expect(valid48h.statusCode).toBe(201);
+
+    // Anything beyond 48 hours (e.g., 72 hours / 259200s) is strictly rejected
+    const invalidOver48h = await app.inject({
+      method: 'POST',
+      url: '/api/transfers',
+      payload: {
+        authToken,
+        totalSizeBytes: 1024,
+        chunkCount: 1,
+        chunkSizeBytes: 4 * 1024 * 1024,
+        ttlSeconds: 259200,
+      },
+    });
+    expect(invalidOver48h.statusCode).toBe(400);
+  });
+
   it('authorizes upload, forwards the stream, and records the stored chunk', async () => {
     database = new MetadataDatabase();
     const storage = new FakeStorageNodeClient();

@@ -1,8 +1,73 @@
-import { useMemo, useRef, useState, type ChangeEvent, type DragEvent } from 'react';
+import React, { useMemo, useRef, useState, useEffect, type ChangeEvent, type DragEvent } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { decryptFilename } from '@voidshare/shared';
-import { downloadFile, uploadFile } from './transfer.js';
+import { downloadFile, uploadFile, type DownloadProgress, type UploadProgress, type UploadResult } from './transfer.js';
+import { GradientBars } from '@/components/ui/GradientBars';
 import './styles.css';
+
+type AppMode = 'home' | 'send' | 'download';
+type SendStep = 'select' | 'configure' | 'review' | 'uploading' | 'result';
+type DownloadStep = 'input' | 'ready' | 'busy' | 'done' | 'error';
+
+const MAX_FILE_SIZE_BYTES = 200 * 1024 * 1024; // 200 MB
+
+const EXPIRATION_OPTIONS = [
+  { label: '1 Hour', seconds: 3600, desc: 'Quick ephemeral transfer' },
+  { label: '6 Hours', seconds: 21600, desc: 'Single workday' },
+  { label: '12 Hours', seconds: 43200, desc: 'Half day' },
+  { label: '24 Hours', seconds: 86400, desc: 'Recommended (1 day)' },
+  { label: '48 Hours', seconds: 172800, desc: 'Maximum allowed duration' },
+];
+
+const DOWNLOAD_LIMIT_OPTIONS = [
+  { label: '1 download', value: 1, desc: 'Self-destructs after first access' },
+  { label: '5 downloads', value: 5, desc: 'Small group or team access' },
+  { label: '10 downloads', value: 10, desc: 'Project workgroup' },
+  { label: '25 downloads', value: 25, desc: 'Team distribution' },
+  { label: '100 downloads', value: 100, desc: 'Extended access' },
+];
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatRelativeTime(seconds: number): string {
+  if (seconds < 3600) return `${Math.round(seconds / 60)} minutes`;
+  if (seconds < 86400) return `${Math.round(seconds / 3600)} hours`;
+  return `${Math.round(seconds / 86400)} days`;
+}
+
+function formatDateTime(isoString: string): string {
+  try {
+    const date = new Date(isoString);
+    return date.toLocaleString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    });
+  } catch {
+    return isoString;
+  }
+}
+
+function parseLinkInput(input: string): { fileId: string; secret: string } | null {
+  const trimmed = input.trim();
+  const urlMatch = trimmed.match(/\/download\/([a-f0-9]{32})(?:#([a-f0-9]{64}))?$/i);
+  if (urlMatch && urlMatch[1] && urlMatch[2]) {
+    return { fileId: urlMatch[1], secret: urlMatch[2] };
+  }
+
+  const directMatch = trimmed.match(/^([a-f0-9]{32})#([a-f0-9]{64})$/i);
+  if (directMatch && directMatch[1] && directMatch[2]) {
+    return { fileId: directMatch[1], secret: directMatch[2] };
+  }
+
+  return null;
+}
 
 function fileIdFromPath(): string | null {
   const match = window.location.pathname.match(/^\/download\/([a-f0-9]{32})$/i);
@@ -10,100 +75,1022 @@ function fileIdFromPath(): string | null {
 }
 
 function App() {
-  const fileId = fileIdFromPath();
-  return <Shell>{fileId ? <DownloadView fileId={fileId} /> : <UploadView />}</Shell>;
-}
+  const pathFileId = fileIdFromPath();
+  const [mode, setMode] = useState<AppMode>(pathFileId ? 'download' : 'home');
 
-function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <main className="shell">
-      <header className="topbar">
-        <a className="brand" href="/" aria-label="VoidShare home"><span className="brand-mark">V</span>voidshare</a>
-        <span className="topbar-note">private by default</span>
-      </header>
-      {children}
-      <footer className="footer">The key stays with you. The server only sees encrypted bytes.</footer>
-    </main>
+    <Shell onGoHome={() => setMode('home')}>
+      {mode === 'home' && (
+        <HomeLanding
+          onSelectSend={() => setMode('send')}
+          onSelectDownload={() => setMode('download')}
+        />
+      )}
+      {mode === 'send' && <SendFlow onBackToHome={() => setMode('home')} />}
+      {mode === 'download' && (
+        <DownloadFlow
+          initialFileId={pathFileId}
+          onBackToHome={() => {
+            if (window.location.pathname !== '/') {
+              window.history.pushState({}, '', '/');
+            }
+            setMode('home');
+          }}
+        />
+      )}
+    </Shell>
   );
 }
 
-function UploadView() {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [file, setFile] = useState<File | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [dragging, setDragging] = useState(false);
-  const [result, setResult] = useState<{ fileId: string; secret: string } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const shareLink = useMemo(() => result ? `${window.location.origin}/download/${result.fileId}#${result.secret}` : '', [result]);
-
-  const choose = (next: File | undefined) => {
-    setError(null);
-    setResult(null);
-    if (!next) return;
-    if (next.size > 200 * 1024 * 1024) { setError('That file is larger than the 200 MB limit.'); return; }
-    setFile(next);
-  };
-  const onInput = (event: ChangeEvent<HTMLInputElement>) => choose(event.target.files?.[0]);
-  const onDrop = (event: DragEvent<HTMLDivElement>) => { event.preventDefault(); setDragging(false); choose(event.dataTransfer.files[0]); };
-
-  const upload = async () => {
-    if (!file) return;
-    setBusy(true); setError(null);
-    try { setResult(await uploadFile(file)); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : 'The upload could not be completed.'); }
-    finally { setBusy(false); }
-  };
-
+function BrandLogo() {
   return (
-    <section className="hero-grid">
-      <div className="intro">
-        <p className="kicker"><span className="pulse" /> encrypted file transfer</p>
-        <h1>Send a file<br /><em>without leaving a copy.</em></h1>
-        <p className="lede">Pick a file. VoidShare encrypts it in your browser and gives you a link whose secret never travels with the request.</p>
-        <div className="trust-line"><span>client-side encryption</span><span>no account</span><span>24 hour expiry</span></div>
+    <div className="brand-badge" aria-hidden="true">
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="none"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <path
+          d="M3.5 4.5L12 20.5L20.5 4.5"
+          stroke="var(--text-primary)"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M7.5 4.5L12 13.5L16.5 4.5"
+          stroke="var(--accent-lime)"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <circle cx="12" cy="13.5" r="1.5" fill="var(--accent-lime)" />
+      </svg>
+    </div>
+  );
+}
+
+function Shell({ children, onGoHome }: { children: React.ReactNode; onGoHome: () => void }) {
+  return (
+    <>
+      {/* Background Animated Gradient Bars (React Bits Pro - Midnight Precision) */}
+      <div className="gradient-bars-bg" aria-hidden="true">
+        <GradientBars
+          barCount={14}
+          gradientPower={0.85}
+          balance={0.15}
+          speed={0.9}
+          phaseSpread={1.8}
+          mirrorRepeat={2.0}
+          alternateDirection={1.0}
+          invertSpeed={0.15}
+          phaseRange={2.0}
+          curvePower={1.6}
+          color="#d8dce6"
+          backgroundColor="#08090a"
+          opacity={0.55}
+          vertical
+        />
+        <div className="bg-vignette" />
       </div>
-      <div className="panel upload-panel">
-        {!result ? <>
-          <div className={`dropzone ${dragging ? 'is-dragging' : ''}`} onClick={() => inputRef.current?.click()} onDragOver={(event) => { event.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={onDrop} role="button" tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') inputRef.current?.click(); }}>
-            <input ref={inputRef} type="file" onChange={onInput} hidden />
-            <span className="drop-icon">＋</span>
-            <strong>{file ? file.name : 'Drop a file here'}</strong>
-            <span>{file ? formatBytes(file.size) : 'or choose one from your device'}</span>
+
+      <main className="shell">
+        <header className="topbar">
+          <a
+            className="brand"
+            href="/"
+            onClick={(e) => {
+              e.preventDefault();
+              onGoHome();
+            }}
+            aria-label="VoidShare home"
+          >
+            <BrandLogo />
+            <span className="brand-title">
+              void<span className="brand-title-muted">share</span>
+            </span>
+          </a>
+        </header>
+
+        {children}
+
+        <footer className="footer">
+          <div className="footer-content">
+            <span>The master key stays exclusively in the URL fragment (#secret). Storage nodes retain zero keys.</span>
+            <span>Max lifetime: 48h · Max size: 200MB</span>
           </div>
-          {error && <p className="error" role="alert">{error}</p>}
-          <button className="primary-button" disabled={!file || busy} onClick={upload}>{busy ? 'Encrypting and sending…' : 'Create private link'}</button>
-          <p className="fine-print">Your browser encrypts the file before any upload begins.</p>
-        </> : <SuccessCard link={shareLink} onReset={() => { setResult(null); setFile(null); }} />}
+        </footer>
+      </main>
+    </>
+  );
+}
+
+// 1. HOME LANDING: Precision developer aesthetic
+function HomeLanding({
+  onSelectSend,
+  onSelectDownload,
+}: {
+  onSelectSend: () => void;
+  onSelectDownload: () => void;
+}) {
+  return (
+    <section className="wizard-container">
+      <div className="landing-hero">
+        <p className="kicker">
+          <span className="pulse" />
+          Client-Side Encrypted Transfers
+        </p>
+        <h1 className="landing-title">
+          Share files.<br />Without the noise.
+        </h1>
+        <p className="landing-subtitle">
+          In-browser WebCrypto AES-256-GCM encryption with atomic lease tracking and automatic 48-hour self-destruction.
+        </p>
+      </div>
+
+      <div className="intent-grid">
+        {/* SENDER — Send a File */}
+        <div
+          className="intent-card"
+          role="button"
+          tabIndex={0}
+          onClick={onSelectSend}
+          onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onSelectSend()}
+        >
+          <div className="intent-icon-wrapper">
+            <span className="intent-icon">↑</span>
+          </div>
+          <div className="intent-content">
+            <h2 className="intent-title">Send a File</h2>
+            <p className="intent-desc">
+              Choose a file, configure access parameters, and generate a secure sharing link.
+            </p>
+            <ul className="intent-highlights">
+              <li>Up to 200 MB per transfer</li>
+              <li>Download limits from 1 to 100</li>
+              <li>Auto-expiration up to 48 hours</li>
+              <li>Local AES-256-GCM encryption</li>
+            </ul>
+          </div>
+          <button className="intent-button primary" onClick={onSelectSend}>
+            Send a File
+          </button>
+        </div>
+
+        {/* RECEIVER — Download a File */}
+        <div
+          className="intent-card"
+          role="button"
+          tabIndex={0}
+          onClick={onSelectDownload}
+          onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onSelectDownload()}
+        >
+          <div className="intent-icon-wrapper download">
+            <span className="intent-icon">↓</span>
+          </div>
+          <div className="intent-content">
+            <h2 className="intent-title">Download a File</h2>
+            <p className="intent-desc">
+              Enter a sharing link you received to access and decrypt the file.
+            </p>
+            <ul className="intent-highlights">
+              <li>Direct storage node streaming</li>
+              <li>In-memory client decryption</li>
+              <li>Integrity verified via SHA-256</li>
+              <li>No account or installation</li>
+            </ul>
+          </div>
+          <button className="intent-button secondary" onClick={onSelectDownload}>
+            Download a File
+          </button>
+        </div>
+      </div>
+
+      <div className="trust-features">
+        <div className="trust-item">
+          <strong>AES-256-GCM Cipher</strong>
+          <span>Payloads are encrypted in chunks with unique IVs before network transmission.</span>
+        </div>
+        <div className="trust-item">
+          <strong>48-Hour Purge Window</strong>
+          <span>All transfer ciphertext is purged from storage nodes within 48 hours.</span>
+        </div>
+        <div className="trust-item">
+          <strong>URL Fragment Key</strong>
+          <span>The master key lives in #secret and is never transmitted to the coordinator.</span>
+        </div>
       </div>
     </section>
   );
 }
 
-function SuccessCard({ link, onReset }: { link: string; onReset: () => void }) {
-  const [copied, setCopied] = useState(false);
-  const copy = async () => { await navigator.clipboard.writeText(link); setCopied(true); window.setTimeout(() => setCopied(false), 1800); };
-  return <div className="success-card"><div className="success-icon">✓</div><p className="kicker">ready to share</p><h2>Your private link is ready.</h2><p className="muted">Anyone with this link can download the file once. The secret is kept in the fragment.</p><div className="link-box"><span>{link.replace(/#.*$/, '')}<b>#secret</b></span><button onClick={copy}>{copied ? 'Copied' : 'Copy link'}</button></div><button className="quiet-button" onClick={onReset}>Send another file</button></div>;
-}
+// 2. SENDER FLOW
+function SendFlow({ onBackToHome }: { onBackToHome: () => void }) {
+  const [step, setStep] = useState<SendStep>('select');
+  const [file, setFile] = useState<File | null>(null);
+  const [downloadLimit, setDownloadLimit] = useState<number>(1);
+  const [ttlSeconds, setTtlSeconds] = useState<number>(86400); // 24h default
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
+  const [uploadResult, setUploadResult] = useState<UploadResult | null>(null);
+  const [error, setError] = useState<{ title: string; message: string; hint?: string } | null>(null);
 
-function DownloadView({ fileId }: { fileId: string }) {
-  const [status, setStatus] = useState<'idle' | 'busy' | 'done' | 'error'>('idle');
-  const [message, setMessage] = useState('');
-  const start = async () => {
-    const secret = window.location.hash.slice(1);
-    if (!/^[a-f0-9]{64}$/i.test(secret)) { setStatus('error'); setMessage('This link is missing its private key.'); return; }
-    setStatus('busy'); setMessage('Checking the link and rebuilding your file…');
-    try {
-      const result = await downloadFile(fileId, secret);
-      const name = result.encryptedFileName ? await decryptFilename(result.encryptedFileName, secret) : 'voidshare-download';
-      const blob = new Blob([result.bytes as unknown as BlobPart]);
-      const anchor = document.createElement('a'); anchor.href = URL.createObjectURL(blob); anchor.download = name; anchor.click(); URL.revokeObjectURL(anchor.href);
-      setStatus('done'); setMessage('The file is ready in your downloads.');
-    } catch (cause) { setStatus('error'); setMessage(cause instanceof Error ? cause.message : 'The download could not be completed.'); }
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
+
+  const handleFileSelect = (selectedFile?: File) => {
+    setError(null);
+    if (!selectedFile) return;
+
+    if (selectedFile.size > MAX_FILE_SIZE_BYTES) {
+      setError({
+        title: 'File Exceeds Limit',
+        message: `The selected file (${formatBytes(selectedFile.size)}) exceeds the maximum allowed size of 200 MB.`,
+        hint: 'Please choose a smaller file or compress it before sending.',
+      });
+      return;
+    }
+
+    if (selectedFile.size === 0) {
+      setError({
+        title: 'Empty File',
+        message: 'The selected file contains 0 bytes.',
+        hint: 'Please choose a valid file that contains data.',
+      });
+      return;
+    }
+
+    setFile(selectedFile);
   };
-  return <section className="download-stage"><div className="download-card"><span className={`download-glyph ${status}`}>{status === 'done' ? '✓' : status === 'error' ? '!' : '↓'}</span><p className="kicker">private download</p><h1>{status === 'done' ? 'Download complete.' : 'A file is waiting.'}</h1><p className="lede">Your browser will decrypt the file locally. The secret never leaves this page.</p>{message && <p className={status === 'error' ? 'error' : 'status'} role={status === 'error' ? 'alert' : 'status'}>{message}</p>}<button className="primary-button" disabled={status === 'busy' || status === 'done'} onClick={start}>{status === 'busy' ? 'Decrypting…' : status === 'done' ? 'Saved to device' : 'Download securely'}</button></div></section>;
+
+  const onFileInputChange = (event: ChangeEvent<HTMLInputElement>) => {
+    handleFileSelect(event.target.files?.[0]);
+  };
+
+  const onDrop = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setDragging(false);
+    handleFileSelect(event.dataTransfer.files[0]);
+  };
+
+  const executeUpload = async () => {
+    if (!file) return;
+
+    setStep('uploading');
+    setError(null);
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    try {
+      const result = await uploadFile(file, {
+        ttlSeconds,
+        maxDownloads: downloadLimit,
+        signal: controller.signal,
+        onProgress: (progress) => {
+          setUploadProgress(progress);
+        },
+      });
+
+      setUploadResult(result);
+      setStep('result');
+    } catch (cause: any) {
+      if (cause?.name === 'AbortError' || cause?.message?.includes('aborted')) {
+        setStep('review');
+        return;
+      }
+
+      setError({
+        title: 'Send Failed',
+        message: cause instanceof Error ? cause.message : 'Unable to complete the encrypted transfer.',
+        hint: 'Your file never left your browser unencrypted. Check your connection and try again.',
+      });
+      setStep('review');
+    } finally {
+      abortControllerRef.current = null;
+    }
+  };
+
+  const cancelUpload = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setStep('review');
+  };
+
+  const resetAll = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setStep('select');
+    setFile(null);
+    setDownloadLimit(1);
+    setTtlSeconds(86400);
+    setUploadProgress(null);
+    setUploadResult(null);
+    setError(null);
+  };
+
+  return (
+    <section className="wizard-container">
+      {/* Header & Stepper */}
+      <div className="wizard-header">
+        <div className="wizard-breadcrumbs">
+          <button className="breadcrumb-link" onClick={onBackToHome}>
+            Home
+          </button>
+          <span className="breadcrumb-sep">/</span>
+          <span className="breadcrumb-current">Send a File</span>
+        </div>
+
+        <div className="step-stepper">
+          <div className={`step-node ${step === 'select' ? 'active' : file ? 'completed' : ''}`}>
+            <span className="step-number">1</span>
+            <span className="step-label">Select File</span>
+          </div>
+          <div className="step-line" />
+          <div className={`step-node ${step === 'configure' ? 'active' : step === 'review' || step === 'uploading' || step === 'result' ? 'completed' : ''}`}>
+            <span className="step-number">2</span>
+            <span className="step-label">Configure</span>
+          </div>
+          <div className="step-line" />
+          <div className={`step-node ${step === 'review' ? 'active' : step === 'uploading' || step === 'result' ? 'completed' : ''}`}>
+            <span className="step-number">3</span>
+            <span className="step-label">Review</span>
+          </div>
+          <div className="step-line" />
+          <div className={`step-node ${step === 'result' ? 'active' : ''}`}>
+            <span className="step-number">4</span>
+            <span className="step-label">Share Link</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Error Alert */}
+      {error && (
+        <div className="alert-card error" role="alert">
+          <div className="alert-header">
+            <strong>{error.title}</strong>
+          </div>
+          <p className="alert-message">{error.message}</p>
+          {error.hint && <p className="alert-hint">💡 {error.hint}</p>}
+        </div>
+      )}
+
+      {/* STEP 1: SELECT FILE */}
+      {step === 'select' && (
+        <div className="wizard-card">
+          <div className="wizard-card-header">
+            <h2>Select File</h2>
+            <p className="muted">
+              Choose a file up to 200 MB. Encryption and chunking begin after confirmation.
+            </p>
+          </div>
+
+          {!file ? (
+            <div
+              className={`dropzone ${dragging ? 'is-dragging' : ''}`}
+              onClick={() => fileInputRef.current?.click()}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragging(true);
+              }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={onDrop}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && fileInputRef.current?.click()}
+            >
+              <input ref={fileInputRef} type="file" onChange={onFileInputChange} hidden />
+              <span className="drop-icon">＋</span>
+              <strong>Drop a file here or browse</strong>
+              <span>Supports any file format up to 200 MB</span>
+              <span className="dropzone-badge">AES-256-GCM · Client Encrypted</span>
+            </div>
+          ) : (
+            <div className="selected-file-panel">
+              <div className="file-info-box">
+                <div className="file-icon">📄</div>
+                <div className="file-details">
+                  <h3 className="file-name">{file.name}</h3>
+                  <div className="file-meta">
+                    <span>{formatBytes(file.size)}</span>
+                    <span>·</span>
+                    <span>{file.type || 'Binary'}</span>
+                    <span>·</span>
+                    <span className="file-status-tag">Ready</span>
+                  </div>
+                </div>
+                <button
+                  className="file-remove-button"
+                  onClick={() => setFile(null)}
+                  title="Remove or choose another file"
+                >
+                  Change
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="wizard-actions">
+            <button className="btn-secondary" onClick={onBackToHome}>
+              Cancel
+            </button>
+            <button
+              className="btn-primary"
+              disabled={!file}
+              onClick={() => setStep('configure')}
+            >
+              Continue
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* STEP 2: CONFIGURE SHARING */}
+      {step === 'configure' && file && (
+        <div className="wizard-card">
+          <div className="wizard-card-header">
+            <h2>Configure Access & Expiration</h2>
+            <p className="muted">
+              Specify download limits and the link self-destruction timeline.
+            </p>
+          </div>
+
+          <div className="file-context-pill">
+            <span>Payload:</span>
+            <strong>{file.name}</strong>
+            <span className="pill-size">({formatBytes(file.size)})</span>
+          </div>
+
+          <div className="config-sections">
+            {/* Download Limit */}
+            <div className="config-block">
+              <div className="config-label-group">
+                <label className="config-title">Download Limit</label>
+                <span className="config-desc">
+                  Atomic lease quota before the file is purged from storage nodes.
+                </span>
+              </div>
+              <div className="options-grid">
+                {DOWNLOAD_LIMIT_OPTIONS.map((opt) => (
+                  <div
+                    key={opt.value}
+                    className={`option-card ${downloadLimit === opt.value ? 'selected' : ''}`}
+                    onClick={() => setDownloadLimit(opt.value)}
+                  >
+                    <div className="option-radio">
+                      <span className={`radio-dot ${downloadLimit === opt.value ? 'checked' : ''}`} />
+                    </div>
+                    <div className="option-info">
+                      <strong className="option-label">{opt.label}</strong>
+                      <span className="option-sub">{opt.desc}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Expiration (Max 48h) */}
+            <div className="config-block">
+              <div className="config-label-group">
+                <label className="config-title">Link Expiration (Max 48 Hours)</label>
+                <span className="config-desc">
+                  Hard expiration window. The maximum allowed lifetime is 48 hours.
+                </span>
+              </div>
+              <div className="options-grid">
+                {EXPIRATION_OPTIONS.map((opt) => (
+                  <div
+                    key={opt.seconds}
+                    className={`option-card ${ttlSeconds === opt.seconds ? 'selected' : ''}`}
+                    onClick={() => setTtlSeconds(opt.seconds)}
+                  >
+                    <div className="option-radio">
+                      <span className={`radio-dot ${ttlSeconds === opt.seconds ? 'checked' : ''}`} />
+                    </div>
+                    <div className="option-info">
+                      <strong className="option-label">{opt.label}</strong>
+                      <span className="option-sub">{opt.desc}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="wizard-actions">
+            <button className="btn-secondary" onClick={() => setStep('select')}>
+              Back
+            </button>
+            <button className="btn-primary" onClick={() => setStep('review')}>
+              Review Settings
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* STEP 3: REVIEW */}
+      {step === 'review' && file && (
+        <div className="wizard-card">
+          <div className="wizard-card-header">
+            <h2>Review Transfer Settings</h2>
+            <p className="muted">
+              Confirm parameters before generating the local key and encrypting chunks.
+            </p>
+          </div>
+
+          <div className="review-table">
+            <div className="review-row">
+              <span className="review-label">File</span>
+              <div className="review-value">
+                <strong>{file.name}</strong>
+                <span className="muted"> ({formatBytes(file.size)})</span>
+              </div>
+            </div>
+
+            <div className="review-row">
+              <span className="review-label">Download Quota</span>
+              <div className="review-value">
+                <strong>
+                  {downloadLimit === 1
+                    ? '1 Download (Atomic single-use)'
+                    : `${downloadLimit} Downloads`}
+                </strong>
+              </div>
+            </div>
+
+            <div className="review-row">
+              <span className="review-label">Expiration Window</span>
+              <div className="review-value">
+                <strong>{formatRelativeTime(ttlSeconds)}</strong>
+                <span className="muted"> (48h max security limit)</span>
+              </div>
+            </div>
+
+            <div className="review-row">
+              <span className="review-label">Cipher Unit</span>
+              <div className="review-value">
+                <span className="tag-crypto">AES-256-GCM · 4 MiB Chunks</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="security-notice">
+            <span className="security-icon">🛡️</span>
+            <p>
+              Your browser will generate a local 256-bit master key via WebCrypto, encrypt the payload into 4 MiB cipher chunks, and distribute them to storage nodes. The secret key stays in the URL fragment.
+            </p>
+          </div>
+
+          <div className="wizard-actions">
+            <button className="btn-secondary" onClick={() => setStep('configure')}>
+              Back
+            </button>
+            <button className="btn-primary" onClick={executeUpload}>
+              Create Share Link
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* STEP 4: UPLOADING PROGRESS */}
+      {step === 'uploading' && file && (
+        <div className="wizard-card">
+          <div className="wizard-card-header">
+            <h2>Creating Share Link...</h2>
+            <p className="muted">
+              Encrypting payload and distributing ciphertext chunks to storage nodes.
+            </p>
+          </div>
+
+          <div className="progress-section">
+            <div className="progress-bar-container">
+              <div
+                className="progress-bar-fill"
+                style={{ width: `${uploadProgress?.percent ?? 15}%` }}
+              />
+            </div>
+            <div className="progress-meta">
+              <span className="progress-percent">{uploadProgress?.percent ?? 15}%</span>
+              <span className="progress-message">
+                {uploadProgress?.message ?? 'Deriving encryption keys...'}
+              </span>
+            </div>
+          </div>
+
+          <div className="upload-file-summary">
+            <span>{file.name}</span>
+            <span> · </span>
+            <span>{formatBytes(file.size)}</span>
+          </div>
+
+          <div className="wizard-actions center">
+            <button className="btn-secondary cancel" onClick={cancelUpload}>
+              Cancel Transfer
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* STEP 5: SHARE LINK RESULT */}
+      {step === 'result' && uploadResult && (
+        <div className="wizard-card result">
+          <SendResultCard
+            result={uploadResult}
+            onSendAnother={resetAll}
+            onBackToHome={onBackToHome}
+          />
+        </div>
+      )}
+    </section>
+  );
 }
 
-function formatBytes(bytes: number): string { return bytes < 1024 * 1024 ? `${Math.ceil(bytes / 1024)} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`; }
+function SendResultCard({
+  result,
+  onSendAnother,
+  onBackToHome,
+}: {
+  result: UploadResult;
+  onSendAnother: () => void;
+  onBackToHome: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const shareLink = useMemo(
+    () => `${window.location.origin}/download/${result.fileId}#${result.secret}`,
+    [result],
+  );
+
+  const copy = async () => {
+    await navigator.clipboard.writeText(shareLink);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleNativeShare = async () => {
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: `VoidShare: ${result.fileName}`,
+          text: `Download encrypted file: ${result.fileName}`,
+          url: shareLink,
+        });
+      } catch {
+        // User dismissed share sheet
+      }
+    } else {
+      copy();
+    }
+  };
+
+  return (
+    <div className="success-container">
+      <div className="success-badge">
+        <span className="success-check">✓</span>
+        <div>
+          <p className="kicker">Transfer Active</p>
+          <h2 className="success-heading">Share link created</h2>
+        </div>
+      </div>
+
+      <p className="success-desc">
+        Anyone with this link can retrieve and decrypt the file. The key is in the <code>#secret</code> fragment and was never sent to the coordinator.
+      </p>
+
+      {/* Link Display Box */}
+      <div className="share-link-box">
+        <div className="share-link-text">
+          <span className="link-base">{shareLink.replace(/#.*$/, '')}</span>
+          <span className="link-secret">#secret</span>
+        </div>
+        <button className={`btn-copy ${copied ? 'copied' : ''}`} onClick={copy}>
+          {copied ? 'Copied' : 'Copy Link'}
+        </button>
+      </div>
+
+      {/* Metadata */}
+      <div className="result-metadata-grid">
+        <div className="meta-card">
+          <span className="meta-label">File</span>
+          <strong className="meta-value">{result.fileName}</strong>
+        </div>
+        <div className="meta-card">
+          <span className="meta-label">Size</span>
+          <strong className="meta-value">{formatBytes(result.fileSizeBytes)}</strong>
+        </div>
+        <div className="meta-card">
+          <span className="meta-label">Quota</span>
+          <strong className="meta-value">
+            {result.maxDownloads === 1 ? '1 Download' : `${result.maxDownloads} Downloads`}
+          </strong>
+        </div>
+        <div className="meta-card">
+          <span className="meta-label">Expires</span>
+          <strong className="meta-value">{formatDateTime(result.expiresAt)}</strong>
+        </div>
+      </div>
+
+      <div className="result-actions">
+        {typeof navigator !== 'undefined' && 'share' in navigator && (
+          <button className="btn-secondary" onClick={handleNativeShare}>
+            Share Link ↗
+          </button>
+        )}
+        <button className="btn-secondary" onClick={onBackToHome}>
+          Home
+        </button>
+        <button className="btn-primary" onClick={onSendAnother}>
+          Send Another File
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// 3. RECEIVER FLOW: Download a File
+function DownloadFlow({
+  initialFileId,
+  onBackToHome,
+}: {
+  initialFileId: string | null;
+  onBackToHome: () => void;
+}) {
+  const initialSecret = typeof window !== 'undefined' ? window.location.hash.slice(1) : '';
+  const [linkInput, setLinkInput] = useState<string>(
+    initialFileId && initialSecret ? `${window.location.origin}/download/${initialFileId}#${initialSecret}` : '',
+  );
+
+  const [activeFileId, setActiveFileId] = useState<string | null>(initialFileId);
+  const [activeSecret, setActiveSecret] = useState<string>(initialSecret);
+  const [step, setStep] = useState<DownloadStep>(initialFileId && initialSecret ? 'ready' : 'input');
+  
+  const [progress, setProgress] = useState<DownloadProgress | null>(null);
+  const [downloadedFileName, setDownloadedFileName] = useState<string>('');
+  const [errorDetails, setErrorDetails] = useState<{ title: string; message: string; hint?: string } | null>(null);
+
+  // Parse link whenever user submits link input
+  const handleAccessLink = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setErrorDetails(null);
+
+    const parsed = parseLinkInput(linkInput);
+    if (!parsed) {
+      setErrorDetails({
+        title: 'Invalid Sharing Link',
+        message: 'The link format is unrecognized or missing its #secret decryption key.',
+        hint: 'Please paste the full sharing link (e.g. http://localhost:5173/download/32hex#64hex).',
+      });
+      return;
+    }
+
+    setActiveFileId(parsed.fileId);
+    setActiveSecret(parsed.secret);
+    setStep('ready');
+  };
+
+  const startDownload = async () => {
+    if (!activeFileId || !activeSecret) {
+      setErrorDetails({
+        title: 'Missing Parameters',
+        message: 'A valid file ID and decryption key are required.',
+        hint: 'Please re-enter your sharing link.',
+      });
+      setStep('input');
+      return;
+    }
+
+    setStep('busy');
+    setErrorDetails(null);
+
+    try {
+      const result = await downloadFile(activeFileId, activeSecret, {
+        onProgress: (p) => setProgress(p),
+      });
+
+      const name = result.encryptedFileName
+        ? await decryptFilename(result.encryptedFileName, activeSecret)
+        : 'voidshare-download';
+
+      setDownloadedFileName(name);
+
+      const blob = new Blob([result.bytes as unknown as BlobPart]);
+      const anchor = document.createElement('a');
+      anchor.href = URL.createObjectURL(blob);
+      anchor.download = name;
+      anchor.click();
+      URL.revokeObjectURL(anchor.href);
+
+      setStep('done');
+    } catch (cause: any) {
+      setStep('error');
+      const msg = cause instanceof Error ? cause.message : 'The download could not be completed.';
+      
+      let hint = 'Contact the sender if you believe this link should still be active.';
+      if (msg.includes('expired') || msg.includes('limit')) {
+        hint = 'Files are deleted immediately once the download limit is reached or the expiration time passes.';
+      } else if (msg.includes('progress')) {
+        hint = 'Another download is currently acquiring chunks for this link. Wait a moment and try again.';
+      }
+
+      setErrorDetails({
+        title: 'Download Unavailable',
+        message: msg,
+        hint,
+      });
+    }
+  };
+
+  return (
+    <section className="wizard-container">
+      <div className="wizard-header">
+        <div className="wizard-breadcrumbs">
+          <button className="breadcrumb-link" onClick={onBackToHome}>
+            Home
+          </button>
+          <span className="breadcrumb-sep">/</span>
+          <span className="breadcrumb-current">Download a File</span>
+        </div>
+      </div>
+
+      {/* Error Alert */}
+      {errorDetails && (
+        <div className="alert-card error" role="alert">
+          <div className="alert-header">
+            <strong>{errorDetails.title}</strong>
+          </div>
+          <p className="alert-message">{errorDetails.message}</p>
+          {errorDetails.hint && <p className="alert-hint">💡 {errorDetails.hint}</p>}
+        </div>
+      )}
+
+      {/* STEP 1: ENTER SHARING LINK */}
+      {step === 'input' && (
+        <div className="wizard-card">
+          <div className="wizard-card-header">
+            <h2>Enter Sharing Link</h2>
+            <p className="muted">
+              Paste the link you received to retrieve and decrypt the file in-memory.
+            </p>
+          </div>
+
+          <form onSubmit={handleAccessLink} className="link-entry-form">
+            <div className="form-group">
+              <label className="config-title">Sharing Link</label>
+              <input
+                type="text"
+                className="text-input"
+                placeholder="Paste sharing link (http://.../download/id#secret)"
+                value={linkInput}
+                onChange={(e) => setLinkInput(e.target.value)}
+                autoFocus
+              />
+              <span className="form-hint">
+                The link must contain the <code>#secret</code> fragment to derive decryption keys.
+              </span>
+            </div>
+
+            <div className="wizard-actions">
+              <button type="button" className="btn-secondary" onClick={onBackToHome}>
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="btn-primary"
+                disabled={!linkInput.trim()}
+              >
+                Access File
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* STEP 2: FILE READY TO DOWNLOAD */}
+      {(step === 'ready' || step === 'error') && activeFileId && (
+        <div className="wizard-card">
+          <div className="wizard-card-header">
+            <h2>Encrypted File Ready</h2>
+            <p className="muted">
+              Ciphertext chunks will stream from storage nodes and decrypt locally in your browser.
+            </p>
+          </div>
+
+          <div className="review-table">
+            <div className="review-row">
+              <span className="review-label">Transfer ID</span>
+              <div className="review-value">
+                <code>{activeFileId}</code>
+              </div>
+            </div>
+
+            <div className="review-row">
+              <span className="review-label">Decryption Key</span>
+              <div className="review-value">
+                <span className="tag-crypto">256-bit Master Key Verified ✓</span>
+              </div>
+            </div>
+
+            <div className="review-row">
+              <span className="review-label">Security Protocol</span>
+              <div className="review-value">
+                <span>In-Browser WebCrypto AES-256-GCM</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="security-notice">
+            <span className="security-icon">🛡️</span>
+            <p>
+              When you click <strong>Download File</strong>, your browser acquires a download lease token, streams the encrypted chunks, verifies SHA-256 checksums, and decrypts the file.
+            </p>
+          </div>
+
+          <div className="wizard-actions">
+            <button
+              className="btn-secondary"
+              onClick={() => {
+                setErrorDetails(null);
+                setStep('input');
+              }}
+            >
+              Enter Another Link
+            </button>
+            <button className="btn-primary" onClick={startDownload}>
+              Download File
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* STEP 3: DOWNLOADING & DECRYPTING */}
+      {step === 'busy' && (
+        <div className="wizard-card">
+          <div className="wizard-card-header">
+            <h2>Decrypting in Browser...</h2>
+            <p className="muted">
+              Streaming ciphertext from storage nodes and assembling decrypted payload.
+            </p>
+          </div>
+
+          <div className="progress-section">
+            <div className="progress-bar-container">
+              <div
+                className="progress-bar-fill"
+                style={{ width: `${progress?.percent ?? 25}%` }}
+              />
+            </div>
+            <div className="progress-meta">
+              <span className="progress-percent">{progress?.percent ?? 25}%</span>
+              <span className="progress-message">
+                {progress?.message ?? 'Connecting to storage nodes...'}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* STEP 4: DOWNLOAD COMPLETE */}
+      {step === 'done' && (
+        <div className="wizard-card result">
+          <div className="success-container">
+            <div className="success-badge">
+              <span className="success-check">✓</span>
+              <div>
+                <p className="kicker">Complete</p>
+                <h2 className="success-heading">File saved to device</h2>
+              </div>
+            </div>
+
+            <p className="success-desc">
+              Your file <strong>"{downloadedFileName}"</strong> has been decrypted in memory and saved to your downloads.
+            </p>
+
+            <div className="result-actions">
+              <button className="btn-secondary" onClick={onBackToHome}>
+                Home
+              </button>
+              <button
+                className="btn-primary"
+                onClick={() => {
+                  setLinkInput('');
+                  setActiveFileId(null);
+                  setActiveSecret('');
+                  setStep('input');
+                }}
+              >
+                Download Another File
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
 
 export default App;
 
