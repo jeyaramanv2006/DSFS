@@ -74,4 +74,43 @@ describe('FilesystemChunkStore', () => {
     expect(await readdir(directory)).toEqual([]);
     expect(await store.hasChunk('chunk-1')).toBe(false);
   });
+
+  it('tracks capacity incrementally on put, overwrite, and delete', async () => {
+    const store = await createStore();
+    const c1 = 'hello';
+    const c2 = 'world!!!';
+
+    await store.putChunk('chunk-1', Readable.from([c1]), checksum(c1));
+    expect((await store.healthCheck()).usedCapacityBytes).toBe(5);
+
+    await store.putChunk('chunk-2', Readable.from([c2]), checksum(c2));
+    expect((await store.healthCheck()).usedCapacityBytes).toBe(13);
+
+    // Overwrite chunk-1 with longer content (10 bytes)
+    const c1New = '0123456789';
+    await store.putChunk('chunk-1', Readable.from([c1New]), checksum(c1New));
+    expect((await store.healthCheck()).usedCapacityBytes).toBe(18); // 10 + 8
+
+    // Delete chunk-2
+    await store.deleteChunk('chunk-2');
+    expect((await store.healthCheck()).usedCapacityBytes).toBe(10); // only chunk-1 remains
+  });
+
+  it('reconciles pre-existing chunks on startup', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'voidshare-node-'));
+    temporaryDirectories.push(directory);
+
+    // First store instance writes a chunk
+    const store1 = new FilesystemChunkStore(directory, 'node-test', 2048);
+    const content = 'pre-existing bytes';
+    await store1.putChunk('chunk-pre', Readable.from([content]), checksum(content));
+
+    // Second store instance starts on same directory
+    const store2 = new FilesystemChunkStore(directory, 'node-test', 2048);
+    // Before any operation, reconcile or healthCheck discovers on-disk chunks
+    const health = await store2.healthCheck();
+    expect(health.usedCapacityBytes).toBe(content.length);
+    expect(await store2.listChunks()).toEqual(['chunk-pre']);
+  });
 });
+

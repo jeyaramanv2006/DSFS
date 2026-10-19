@@ -29,6 +29,7 @@ export interface IStorageNode {
   hasChunk(chunkId: string): Promise<boolean>;
   listChunks(): Promise<string[]>;
   healthCheck(): Promise<NodeHealthReport>;
+  reconcile(): Promise<number>;
 }
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/i;
@@ -36,6 +37,8 @@ const CHUNK_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 export class FilesystemChunkStore implements IStorageNode {
   private readonly root: string;
+  private usedBytes = 0;
+  private initialized = false;
 
   public constructor(
     private readonly dataDir: string,
@@ -43,6 +46,26 @@ export class FilesystemChunkStore implements IStorageNode {
     private readonly totalCapacityBytes = 0,
   ) {
     this.root = resolve(dataDir);
+  }
+
+  public async reconcile(): Promise<number> {
+    await mkdir(this.root, { recursive: true });
+    const entries = await readdir(this.root, { withFileTypes: true });
+    let total = 0;
+    for (const entry of entries) {
+      if (!entry.isFile() || entry.name.endsWith('.tmp')) {
+        continue;
+      }
+      try {
+        const fileStat = await stat(this.chunkPath(entry.name));
+        total += fileStat.size;
+      } catch {
+        // file removed concurrently
+      }
+    }
+    this.usedBytes = total;
+    this.initialized = true;
+    return total;
   }
 
   public async putChunk(
@@ -75,7 +98,21 @@ export class FilesystemChunkStore implements IStorageNode {
         throw new Error('checksum mismatch');
       }
 
+      let previousSize = 0;
+      try {
+        const fileStat = await stat(finalPath);
+        previousSize = fileStat.size;
+      } catch {
+        // file does not exist yet
+      }
+
       await rename(temporaryPath, finalPath);
+      if (!this.initialized) {
+        await this.reconcile();
+      } else {
+        this.usedBytes = Math.max(0, this.usedBytes - previousSize + sizeBytes);
+      }
+
       return { sizeBytes, checksumSha256 };
     } catch (error) {
       await rm(temporaryPath, { force: true });
@@ -91,13 +128,20 @@ export class FilesystemChunkStore implements IStorageNode {
 
   public async deleteChunk(chunkId: string): Promise<boolean> {
     const path = this.chunkPath(chunkId);
+    let previousSize = 0;
     try {
-      await access(path);
+      const fileStat = await stat(path);
+      previousSize = fileStat.size;
     } catch {
       return false;
     }
 
     await rm(path);
+    if (!this.initialized) {
+      await this.reconcile();
+    } else {
+      this.usedBytes = Math.max(0, this.usedBytes - previousSize);
+    }
     return true;
   }
 
@@ -121,21 +165,15 @@ export class FilesystemChunkStore implements IStorageNode {
   }
 
   public async healthCheck(): Promise<NodeHealthReport> {
-    await mkdir(this.root, { recursive: true });
-    const entries = await readdir(this.root, { withFileTypes: true });
-    let usedCapacityBytes = 0;
-    for (const entry of entries) {
-      if (!entry.isFile() || entry.name.endsWith('.tmp')) {
-        continue;
-      }
-      usedCapacityBytes += (await stat(this.chunkPath(entry.name))).size;
+    if (!this.initialized) {
+      await this.reconcile();
     }
 
     return {
       nodeId: this.nodeId,
       status: 'HEALTHY',
       totalCapacityBytes: this.totalCapacityBytes,
-      usedCapacityBytes,
+      usedCapacityBytes: this.usedBytes,
       activeOperations: 0,
     };
   }
