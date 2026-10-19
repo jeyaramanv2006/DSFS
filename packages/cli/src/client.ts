@@ -2,6 +2,9 @@ import {
   createChunkAad,
   decryptChunk,
   deriveKeys,
+  encodeRetrievalCode,
+  decodeRetrievalCode,
+  isValidRetrievalCode,
   encryptChunk,
   encryptFilename,
   generateSecret,
@@ -28,6 +31,7 @@ async function expectResponse(response: Response): Promise<Response> {
 export interface CliUploadResult {
   fileId: string;
   secret: string;
+  retrievalCode: string;
 }
 
 export async function uploadBytes(
@@ -81,7 +85,35 @@ export async function uploadBytes(
     headers: { authorization: `Bearer ${init.uploadToken}`, 'content-type': 'application/json' },
     body: JSON.stringify({ totalChunksUploaded: encryptedChunks.length }),
   }));
-  return { fileId: init.fileId, secret };
+  return { fileId: init.fileId, secret, retrievalCode: encodeRetrievalCode(secret) };
+}
+
+export async function resolveTransfer(
+  baseUrl: string,
+  secretOrCode: string,
+): Promise<{ fileId: string; status: string; totalSizeBytes: number; encryptedFileName: string | null }> {
+  const secret = isValidRetrievalCode(secretOrCode)
+    ? decodeRetrievalCode(secretOrCode)
+    : secretOrCode;
+  const { authToken } = await deriveKeys(secret);
+  const response = await expectResponse(await fetch(apiUrl(baseUrl, '/api/transfers/resolve'), {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${bytesToHex(authToken)}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ authToken: bytesToHex(authToken) }),
+  }));
+  return response.json();
+}
+
+export async function downloadByCode(baseUrl: string, retrievalCode: string): Promise<Uint8Array> {
+  if (!isValidRetrievalCode(retrievalCode)) {
+    throw new Error('invalid retrieval code');
+  }
+  const secret = decodeRetrievalCode(retrievalCode);
+  const resolved = await resolveTransfer(baseUrl, retrievalCode);
+  return downloadBytes(baseUrl, resolved.fileId, secret);
 }
 
 export async function downloadBytes(baseUrl: string, fileId: string, secret: string): Promise<Uint8Array> {

@@ -1131,7 +1131,51 @@ input:focus-visible {
   justify-content: flex-end;
 }
 
-/* Receiver Link Entry Form */
+/* Receiver Link & Code Entry Form */
+.tab-pill-group {
+  display: flex;
+  gap: 6px;
+  background: var(--surface-elevated);
+  padding: 4px;
+  border-radius: var(--radius-btn);
+  border: 1px solid var(--border-hairline);
+  margin-bottom: 8px;
+}
+
+.tab-pill {
+  flex: 1;
+  padding: 8px 14px;
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid transparent;
+  border-radius: calc(var(--radius-btn) - 2px);
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.tab-pill:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.tab-pill.active {
+  background: var(--surface-interactive);
+  color: var(--text-primary);
+  border-color: var(--border-subtle);
+}
+
+.text-input.font-mono {
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+  font-size: 0.88rem;
+}
+
 .link-entry-form {
   display: flex;
   flex-direction: column;

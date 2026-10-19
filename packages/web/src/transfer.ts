@@ -1,6 +1,7 @@
 import {
   createChunkAad,
   decryptChunk,
+  decryptFilename,
   deriveKeys,
   encodeRetrievalCode,
   encryptChunk,
@@ -360,3 +361,61 @@ export async function downloadFile(
     encryptedFileName: access.encryptedFileName ?? null,
   };
 }
+
+export interface TransferPreview {
+  fileId: string;
+  status: string;
+  fileName: string;
+  fileSizeBytes: number;
+  chunkCount: number;
+  chunkSizeBytes: number;
+  expiresAt: string;
+  downloadCount: number;
+  maxDownloads: number;
+}
+
+export async function resolveTransfer(
+  secret: string,
+  fileId?: string | null,
+  options: { signal?: AbortSignal } = {},
+): Promise<TransferPreview> {
+  const { authToken } = await deriveKeys(secret);
+  const tokenHex = bytesToHex(authToken);
+
+  let response: Response;
+  if (fileId) {
+    response = await fetch(`/api/transfers/${encodeURIComponent(fileId)}/preview`, {
+      method: 'GET',
+      headers: { authorization: `Bearer ${tokenHex}` },
+      signal: options.signal,
+    });
+  } else {
+    response = await fetch('/api/transfers/resolve', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${tokenHex}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ authToken: tokenHex }),
+      signal: options.signal,
+    });
+  }
+
+  const data = await responseJson(response);
+  const fileName = data.encryptedFileName
+    ? await decryptFilename(data.encryptedFileName, secret)
+    : 'voidshare-download';
+
+  return {
+    fileId: data.fileId,
+    status: data.status,
+    fileName,
+    fileSizeBytes: data.totalSizeBytes,
+    chunkCount: data.chunkCount,
+    chunkSizeBytes: data.chunkSizeBytes,
+    expiresAt: data.expiresAt,
+    downloadCount: data.downloadCount,
+    maxDownloads: data.maxDownloads,
+  };
+}
+

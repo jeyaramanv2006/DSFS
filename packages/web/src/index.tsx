@@ -1,7 +1,20 @@
 import React, { useMemo, useRef, useState, useEffect, type ChangeEvent, type DragEvent } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { decryptFilename, encodeRetrievalCode } from '@voidshare/shared';
-import { downloadFile, uploadFile, type DownloadProgress, type UploadProgress, type UploadResult } from './transfer.js';
+import {
+  decryptFilename,
+  encodeRetrievalCode,
+  decodeRetrievalCode,
+  isValidRetrievalCode,
+} from '@voidshare/shared';
+import {
+  downloadFile,
+  uploadFile,
+  resolveTransfer,
+  type DownloadProgress,
+  type UploadProgress,
+  type UploadResult,
+  type TransferPreview,
+} from './transfer.js';
 import { GradientBars } from '@/components/ui/GradientBars';
 import './styles.css';
 
@@ -858,36 +871,131 @@ function DownloadFlow({
   onBackToHome: () => void;
 }) {
   const initialSecret = typeof window !== 'undefined' ? window.location.hash.slice(1) : '';
+  const [entryTab, setEntryTab] = useState<'link' | 'code'>('link');
   const [linkInput, setLinkInput] = useState<string>(
     initialFileId && initialSecret ? `${window.location.origin}/download/${initialFileId}#${initialSecret}` : '',
   );
+  const [codeInput, setCodeInput] = useState<string>('');
 
   const [activeFileId, setActiveFileId] = useState<string | null>(initialFileId);
   const [activeSecret, setActiveSecret] = useState<string>(initialSecret);
+  const [previewMeta, setPreviewMeta] = useState<TransferPreview | null>(null);
   const [step, setStep] = useState<DownloadStep>(initialFileId && initialSecret ? 'ready' : 'input');
+  const [resolving, setResolving] = useState<boolean>(false);
   
   const [progress, setProgress] = useState<DownloadProgress | null>(null);
   const [downloadedFileName, setDownloadedFileName] = useState<string>('');
   const [errorDetails, setErrorDetails] = useState<{ title: string; message: string; hint?: string } | null>(null);
 
-  // Parse link whenever user submits link input
-  const handleAccessLink = (e?: React.FormEvent) => {
+  // Automatically resolve preview if loaded with direct URL
+  useEffect(() => {
+    if (initialFileId && initialSecret) {
+      setResolving(true);
+      resolveTransfer(initialSecret, initialFileId)
+        .then((preview) => {
+          setActiveFileId(preview.fileId);
+          setActiveSecret(initialSecret);
+          setPreviewMeta(preview);
+          setStep('ready');
+        })
+        .catch((err) => {
+          setErrorDetails({
+            title: 'Transfer Unavailable',
+            message: err instanceof Error ? err.message : 'Unable to access transfer',
+            hint: 'The transfer link may have expired or reached its download limit.',
+          });
+          setStep('input');
+        })
+        .finally(() => setResolving(false));
+    }
+  }, [initialFileId, initialSecret]);
+
+  // Handle Share Link submission
+  const handleAccessLink = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setErrorDetails(null);
 
-    const parsed = parseLinkInput(linkInput);
+    const trimmed = linkInput.trim();
+    // Auto-detect if user entered a 43-character retrieval code in the link input
+    if (isValidRetrievalCode(trimmed)) {
+      setEntryTab('code');
+      setCodeInput(trimmed);
+      return executeCodeResolution(trimmed);
+    }
+
+    const parsed = parseLinkInput(trimmed);
     if (!parsed) {
       setErrorDetails({
         title: 'Invalid Sharing Link',
         message: 'The link format is unrecognized or missing its #secret decryption key.',
-        hint: 'Please paste the full sharing link (e.g. http://localhost:5173/download/32hex#64hex).',
+        hint: 'Please paste the full sharing link (e.g. http://.../download/id#secret) or switch to the Retrieval Code tab.',
       });
       return;
     }
 
-    setActiveFileId(parsed.fileId);
-    setActiveSecret(parsed.secret);
-    setStep('ready');
+    setResolving(true);
+    try {
+      const preview = await resolveTransfer(parsed.secret, parsed.fileId);
+      setActiveFileId(parsed.fileId);
+      setActiveSecret(parsed.secret);
+      setPreviewMeta(preview);
+      setStep('ready');
+    } catch (cause: any) {
+      setErrorDetails({
+        title: 'Transfer Unavailable',
+        message: cause instanceof Error ? cause.message : 'Unable to access transfer.',
+        hint: 'Please confirm the link has not expired and download limits remain.',
+      });
+    } finally {
+      setResolving(false);
+    }
+  };
+
+  // Helper for code resolution
+  const executeCodeResolution = async (code: string) => {
+    if (!isValidRetrievalCode(code)) {
+      setErrorDetails({
+        title: 'Invalid Retrieval Code',
+        message: 'The retrieval code must be exactly 43 URL-safe Base64 characters.',
+        hint: 'Check that you copied the complete code without extra spaces or symbols.',
+      });
+      return;
+    }
+
+    setResolving(true);
+    try {
+      const hexSecret = decodeRetrievalCode(code);
+      const preview = await resolveTransfer(hexSecret);
+      setActiveFileId(preview.fileId);
+      setActiveSecret(hexSecret);
+      setPreviewMeta(preview);
+      setStep('ready');
+    } catch (cause: any) {
+      setErrorDetails({
+        title: 'Transfer Unavailable',
+        message: cause instanceof Error ? cause.message : 'Unable to resolve transfer from retrieval code.',
+        hint: 'The transfer may have expired, reached its download limit, or the code is incorrect.',
+      });
+    } finally {
+      setResolving(false);
+    }
+  };
+
+  // Handle Retrieval Code submission
+  const handleAccessCode = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setErrorDetails(null);
+
+    const trimmed = codeInput.trim();
+    // Auto-detect if user pasted a link into the code tab
+    const parsed = parseLinkInput(trimmed);
+    if (parsed) {
+      setEntryTab('link');
+      setLinkInput(trimmed);
+      return handleAccessLink();
+    }
+
+    await executeCodeResolution(trimmed);
   };
 
   const startDownload = async () => {
@@ -895,7 +1003,7 @@ function DownloadFlow({
       setErrorDetails({
         title: 'Missing Parameters',
         message: 'A valid file ID and decryption key are required.',
-        hint: 'Please re-enter your sharing link.',
+        hint: 'Please re-enter your sharing link or retrieval code.',
       });
       setStep('input');
       return;
@@ -911,7 +1019,7 @@ function DownloadFlow({
 
       const name = result.encryptedFileName
         ? await decryptFilename(result.encryptedFileName, activeSecret)
-        : 'voidshare-download';
+        : previewMeta?.fileName || 'voidshare-download';
 
       setDownloadedFileName(name);
 
@@ -927,7 +1035,7 @@ function DownloadFlow({
       setStep('error');
       const msg = cause instanceof Error ? cause.message : 'The download could not be completed.';
       
-      let hint = 'Contact the sender if you believe this link should still be active.';
+      let hint = 'Contact the sender if you believe this transfer should still be active.';
       if (msg.includes('expired') || msg.includes('limit')) {
         hint = 'Files are deleted immediately once the download limit is reached or the expiration time passes.';
       } else if (msg.includes('progress')) {
@@ -965,45 +1073,101 @@ function DownloadFlow({
         </div>
       )}
 
-      {/* STEP 1: ENTER SHARING LINK */}
+      {/* STEP 1: ENTER LINK OR CODE */}
       {step === 'input' && (
         <div className="wizard-card">
           <div className="wizard-card-header">
-            <h2>Enter Sharing Link</h2>
+            <h2>Access Encrypted File</h2>
             <p className="muted">
-              Paste the link you received to retrieve and decrypt the file in-memory.
+              Choose your access method: enter a direct sharing link or a 43-character retrieval code.
             </p>
           </div>
 
-          <form onSubmit={handleAccessLink} className="link-entry-form">
-            <div className="form-group">
-              <label className="config-title">Sharing Link</label>
-              <input
-                type="text"
-                className="text-input"
-                placeholder="Paste sharing link (http://.../download/id#secret)"
-                value={linkInput}
-                onChange={(e) => setLinkInput(e.target.value)}
-                autoFocus
-              />
-              <span className="form-hint">
-                The link must contain the <code>#secret</code> fragment to derive decryption keys.
-              </span>
-            </div>
+          {/* Mode Switcher Tabs */}
+          <div className="tab-pill-group">
+            <button
+              type="button"
+              className={`tab-pill ${entryTab === 'link' ? 'active' : ''}`}
+              onClick={() => {
+                setEntryTab('link');
+                setErrorDetails(null);
+              }}
+            >
+              🔗 Share Link
+            </button>
+            <button
+              type="button"
+              className={`tab-pill ${entryTab === 'code' ? 'active' : ''}`}
+              onClick={() => {
+                setEntryTab('code');
+                setErrorDetails(null);
+              }}
+            >
+              🔑 Retrieval Code
+            </button>
+          </div>
 
-            <div className="wizard-actions">
-              <button type="button" className="btn-secondary" onClick={onBackToHome}>
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="btn-primary"
-                disabled={!linkInput.trim()}
-              >
-                Access File
-              </button>
-            </div>
-          </form>
+          {entryTab === 'link' ? (
+            <form onSubmit={handleAccessLink} className="link-entry-form">
+              <div className="form-group">
+                <label className="config-title">Sharing Link</label>
+                <input
+                  type="text"
+                  className="text-input"
+                  placeholder="Paste sharing link (http://.../download/id#secret)"
+                  value={linkInput}
+                  onChange={(e) => setLinkInput(e.target.value)}
+                  autoFocus
+                />
+                <span className="form-hint">
+                  The link must contain the <code>#secret</code> fragment to derive decryption keys.
+                </span>
+              </div>
+
+              <div className="wizard-actions">
+                <button type="button" className="btn-secondary" onClick={onBackToHome}>
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn-primary"
+                  disabled={!linkInput.trim() || resolving}
+                >
+                  {resolving ? 'Verifying Link...' : 'Access File'}
+                </button>
+              </div>
+            </form>
+          ) : (
+            <form onSubmit={handleAccessCode} className="link-entry-form">
+              <div className="form-group">
+                <label className="config-title">Retrieval Code</label>
+                <input
+                  type="text"
+                  className="text-input font-mono"
+                  placeholder="Paste 43-character retrieval code"
+                  value={codeInput}
+                  onChange={(e) => setCodeInput(e.target.value)}
+                  autoFocus
+                />
+                <span className="form-hint">
+                  Enter the 43-character unpadded Base64url code provided by the sender.
+                </span>
+              </div>
+
+              <div className="wizard-actions">
+                <button type="button" className="btn-secondary" onClick={onBackToHome}>
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn-primary"
+                  disabled={!codeInput.trim() || resolving}
+                >
+                  {resolving ? 'Verifying Code...' : 'Access File'}
+                </button>
+              </div>
+            </form>
+          )}
         </div>
       )}
 
@@ -1011,19 +1175,49 @@ function DownloadFlow({
       {(step === 'ready' || step === 'error') && activeFileId && (
         <div className="wizard-card">
           <div className="wizard-card-header">
-            <h2>Encrypted File Ready</h2>
+            <h2>{previewMeta ? previewMeta.fileName : 'Encrypted File Ready'}</h2>
             <p className="muted">
-              Ciphertext chunks will stream from storage nodes and decrypt locally in your browser.
+              {previewMeta
+                ? `${formatBytes(previewMeta.fileSizeBytes)} · Verified locally with 256-bit AES-GCM`
+                : 'Ciphertext chunks will stream from storage nodes and decrypt locally in your browser.'}
             </p>
           </div>
 
           <div className="review-table">
+            <div className="review-row">
+              <span className="review-label">File Payload</span>
+              <div className="review-value">
+                <strong>{previewMeta?.fileName ?? 'Encrypted Payload'}</strong>
+                {previewMeta && <span className="muted"> ({formatBytes(previewMeta.fileSizeBytes)})</span>}
+              </div>
+            </div>
+
             <div className="review-row">
               <span className="review-label">Transfer ID</span>
               <div className="review-value">
                 <code>{activeFileId}</code>
               </div>
             </div>
+
+            {previewMeta && (
+              <>
+                <div className="review-row">
+                  <span className="review-label">Remaining Quota</span>
+                  <div className="review-value">
+                    <strong>
+                      {previewMeta.maxDownloads - previewMeta.downloadCount} of {previewMeta.maxDownloads} downloads left
+                    </strong>
+                  </div>
+                </div>
+
+                <div className="review-row">
+                  <span className="review-label">Expires</span>
+                  <div className="review-value">
+                    <span>{formatDateTime(previewMeta.expiresAt)}</span>
+                  </div>
+                </div>
+              </>
+            )}
 
             <div className="review-row">
               <span className="review-label">Decryption Key</span>
@@ -1043,7 +1237,7 @@ function DownloadFlow({
           <div className="security-notice">
             <span className="security-icon">🛡️</span>
             <p>
-              When you click <strong>Download File</strong>, your browser acquires a download lease token, streams the encrypted chunks, verifies SHA-256 checksums, and decrypts the file.
+              Click <strong>Download File</strong> to acquire an atomic download lease token, stream the encrypted chunks from storage nodes, verify SHA-256 integrity, and save the decrypted file.
             </p>
           </div>
 
@@ -1055,7 +1249,7 @@ function DownloadFlow({
                 setStep('input');
               }}
             >
-              Enter Another Link
+              Enter Another Link or Code
             </button>
             <button className="btn-primary" onClick={startDownload}>
               Download File
