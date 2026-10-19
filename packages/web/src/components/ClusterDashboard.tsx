@@ -78,16 +78,28 @@ export function ClusterDashboard() {
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [events, setEvents] = useState<ClusterEvent[]>([]);
   const [eventFilter, setEventFilter] = useState<'ALL' | 'HEALTH' | 'TRANSFERS' | 'REPLICATION'>('ALL');
+  const [showDemoGuide, setShowDemoGuide] = useState(true);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [consecutiveErrors, setConsecutiveErrors] = useState(0);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const isFetchingRef = useRef(false);
 
-  const pollData = async (signal?: AbortSignal) => {
+  const pollData = async (externalSignal?: AbortSignal) => {
     if (isFetchingRef.current) return;
     isFetchingRef.current = true;
+
+    const timeoutController = new AbortController();
+    const timeoutId = setTimeout(() => timeoutController.abort(), 4000);
+
+    const onExternalAbort = () => timeoutController.abort();
+    if (externalSignal) {
+      externalSignal.addEventListener('abort', onExternalAbort);
+    }
+
     try {
+      const signal = timeoutController.signal;
       const [overviewData, nodesData, transfersData, eventsData] = await Promise.all([
         fetchClusterOverview(signal),
         fetchClusterNodes(signal),
@@ -100,21 +112,27 @@ export function ClusterDashboard() {
       setEvents(eventsData);
       setLastUpdated(new Date());
       setError(null);
+      setConsecutiveErrors(0);
 
-      // Auto-select first transfer if none selected yet
       if (!selectedFileId && transfersData.length > 0) {
         setSelectedFileId(transfersData[0].fileId);
       }
     } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') return;
+      if (err instanceof Error && err.name === 'AbortError' && externalSignal?.aborted) {
+        return;
+      }
+      setConsecutiveErrors((prev) => prev + 1);
       setError(err instanceof Error ? err.message : 'Failed to connect to cluster API');
     } finally {
+      clearTimeout(timeoutId);
+      if (externalSignal) {
+        externalSignal.removeEventListener('abort', onExternalAbort);
+      }
       isFetchingRef.current = false;
       setLoading(false);
     }
   };
 
-  // Poll transfer detail when selectedFileId changes
   useEffect(() => {
     if (!selectedFileId) {
       setTransferDetail(null);
@@ -145,7 +163,6 @@ export function ClusterDashboard() {
 
     const intervalId = setInterval(() => {
       void pollData(controller.signal);
-      // Also refresh selected transfer detail if one is selected
       if (selectedFileId) {
         fetchTransferChunks(selectedFileId, controller.signal)
           .then((detail) => setTransferDetail(detail))
@@ -159,7 +176,10 @@ export function ClusterDashboard() {
     };
   }, [selectedFileId]);
 
-  // Filter events according to active tab
+  const unavailableNodesList = nodes.filter((n) => n.status === 'UNAVAILABLE');
+  const unhealthyNodesList = nodes.filter((n) => n.status === 'UNHEALTHY');
+  const isDataStale = !!(error && lastUpdated && Date.now() - lastUpdated.getTime() > 4000);
+
   const filteredEvents = events.filter((e) => {
     if (eventFilter === 'HEALTH') {
       return e.eventType.includes('HEALTH') || e.eventType.includes('HEARTBEAT');
@@ -184,7 +204,7 @@ export function ClusterDashboard() {
   });
 
   return (
-    <div className="cluster-view">
+    <div className={`cluster-view ${isDataStale ? 'cluster-view-stale' : ''}`}>
       <header className="cluster-header">
         <div className="cluster-header-main">
           <div className="cluster-header-title-row">
@@ -192,7 +212,9 @@ export function ClusterDashboard() {
             <div className="cluster-live-indicator">
               <span className={`live-dot ${error ? 'live-dot-error' : 'live-dot-pulse'}`} />
               <span className="live-label">
-                {error ? 'CONNECTION DEGRADED' : 'LIVE TELEMETRY (2s)'}
+                {error
+                  ? `CONNECTION DISRUPTED (${consecutiveErrors} missed)`
+                  : 'LIVE TELEMETRY (2s)'}
               </span>
             </div>
           </div>
@@ -205,7 +227,8 @@ export function ClusterDashboard() {
         <div className="cluster-header-actions">
           {lastUpdated && (
             <span className="cluster-timestamp">
-              Updated: {lastUpdated.toLocaleTimeString()}
+              {isDataStale ? 'Last contact: ' : 'Updated: '}
+              {lastUpdated.toLocaleTimeString()}
             </span>
           )}
           <button
@@ -219,11 +242,44 @@ export function ClusterDashboard() {
         </div>
       </header>
 
+      {/* Connection Outage Sticky Banner */}
       {error && (
         <div className="cluster-alert cluster-alert-error" role="alert">
           <div className="cluster-alert-icon">⚠️</div>
           <div className="cluster-alert-content">
-            <strong>Coordinator API Unreachable:</strong> {error}. Showing last known state.
+            <div className="cluster-alert-title">
+              <strong>Coordinator Connection Lost:</strong> {error}
+            </div>
+            <div className="cluster-alert-desc">
+              Displaying cached cluster state from{' '}
+              {lastUpdated
+                ? `${Math.round((Date.now() - lastUpdated.getTime()) / 1000)}s ago`
+                : 'previous cycle'}
+              . Dashboard remains active and will automatically reconnect once available.
+            </div>
+          </div>
+          <button
+            type="button"
+            className="action-btn-secondary alert-retry-btn"
+            onClick={() => void pollData()}
+          >
+            Retry Connection
+          </button>
+        </div>
+      )}
+
+      {/* Node Failure / Failover Active Banner */}
+      {unavailableNodesList.length > 0 && !error && (
+        <div className="cluster-alert cluster-alert-warn" role="alert">
+          <div className="cluster-alert-icon">⚡</div>
+          <div className="cluster-alert-content">
+            <div className="cluster-alert-title">
+              <strong>Storage Node Outage Detected:</strong>{' '}
+              {unavailableNodesList.map((n) => n.nodeId).join(', ')} is currently offline.
+            </div>
+            <div className="cluster-alert-desc">
+              VoidShare read failover is ACTIVE. All chunk downloads will seamlessly route to online peer replicas on healthy storage nodes.
+            </div>
           </div>
         </div>
       )}
@@ -271,9 +327,10 @@ export function ClusterDashboard() {
             <div
               className="metric-progress-fill"
               style={{
-                width: overview && overview.totalCapacityBytes > 0
-                  ? `${Math.min(100, (overview.usedCapacityBytes / overview.totalCapacityBytes) * 100)}%`
-                  : '0%',
+                width:
+                  overview && overview.totalCapacityBytes > 0
+                    ? `${Math.min(100, (overview.usedCapacityBytes / overview.totalCapacityBytes) * 100)}%`
+                    : '0%',
               }}
             />
           </div>
@@ -332,6 +389,7 @@ export function ClusterDashboard() {
           {nodes.map((node) => {
             const isHealthy = node.status === 'HEALTHY';
             const isUnhealthy = node.status === 'UNHEALTHY';
+            const isUnavailable = node.status === 'UNAVAILABLE';
             const percentUsed =
               node.totalCapacityBytes > 0
                 ? Math.min(100, (node.usedCapacityBytes / node.totalCapacityBytes) * 100)
@@ -341,7 +399,11 @@ export function ClusterDashboard() {
               <div
                 key={node.nodeId}
                 className={`node-card ${
-                  isHealthy ? 'node-card-healthy' : isUnhealthy ? 'node-card-unhealthy' : 'node-card-unavailable'
+                  isHealthy
+                    ? 'node-card-healthy'
+                    : isUnhealthy
+                    ? 'node-card-unhealthy'
+                    : 'node-card-unavailable'
                 }`}
               >
                 <div className="node-card-header">
@@ -402,7 +464,8 @@ export function ClusterDashboard() {
                   <div className="node-capacity-header">
                     <span>CAPACITY UTILIZATION</span>
                     <span>
-                      {formatBytes(node.usedCapacityBytes)} / {formatBytes(node.totalCapacityBytes)} ({percentUsed.toFixed(1)}%)
+                      {formatBytes(node.usedCapacityBytes)} / {formatBytes(node.totalCapacityBytes)}{' '}
+                      ({percentUsed.toFixed(1)}%)
                     </span>
                   </div>
                   <div className="node-capacity-bar">
@@ -421,7 +484,8 @@ export function ClusterDashboard() {
 
                 <div className="node-card-footer">
                   <span className="node-footer-timestamp">
-                    Timestamp: {node.lastHeartbeat ? new Date(node.lastHeartbeat).toLocaleTimeString() : 'N/A'}
+                    Timestamp:{' '}
+                    {node.lastHeartbeat ? new Date(node.lastHeartbeat).toLocaleTimeString() : 'N/A'}
                   </span>
                 </div>
               </div>
@@ -462,16 +526,24 @@ export function ClusterDashboard() {
                   >
                     <div className="transfer-card-top">
                       <span className="transfer-id-mono">{t.fileId.slice(0, 12)}...</span>
-                      <span className={`status-pill ${t.status === 'READY' ? 'status-pill-success' : 'status-pill-warn'}`}>
+                      <span
+                        className={`status-pill ${
+                          t.status === 'READY' ? 'status-pill-success' : 'status-pill-warn'
+                        }`}
+                      >
                         {t.status}
                       </span>
                     </div>
                     <div className="transfer-card-meta">
                       <span>{formatBytes(t.totalSizeBytes)}</span>
                       <span>·</span>
-                      <span>{t.chunkCount} {t.chunkCount === 1 ? 'chunk' : 'chunks'}</span>
+                      <span>
+                        {t.chunkCount} {t.chunkCount === 1 ? 'chunk' : 'chunks'}
+                      </span>
                       <span>·</span>
-                      <span>DL: {t.downloadCount}/{t.maxDownloads}</span>
+                      <span>
+                        DL: {t.downloadCount}/{t.maxDownloads}
+                      </span>
                     </div>
                     {t.isDegraded ? (
                       <div className="degraded-badge">⚠️ Under-Replicated</div>
@@ -488,7 +560,9 @@ export function ClusterDashboard() {
               {loadingDetail && !transferDetail ? (
                 <div className="empty-panel">Loading chunk placement metadata...</div>
               ) : !transferDetail ? (
-                <div className="empty-panel">Select a transfer on the left to inspect its chunk replicas.</div>
+                <div className="empty-panel">
+                  Select a transfer on the left to inspect its chunk replicas.
+                </div>
               ) : (
                 <div className="transfer-detail-content">
                   <div className="transfer-detail-header">
@@ -498,11 +572,17 @@ export function ClusterDashboard() {
                         <code className="code-id">{transferDetail.fileId}</code>
                       </div>
                       <div className="transfer-detail-sub">
-                        <span>Status: <strong className="color-success">{transferDetail.status}</strong></span>
+                        <span>
+                          Status: <strong className="color-success">{transferDetail.status}</strong>
+                        </span>
                         <span>·</span>
-                        <span>Total: <strong>{formatBytes(transferDetail.totalSizeBytes)}</strong></span>
+                        <span>
+                          Total: <strong>{formatBytes(transferDetail.totalSizeBytes)}</strong>
+                        </span>
                         <span>·</span>
-                        <span>Chunks: <strong>{transferDetail.chunkCount}</strong></span>
+                        <span>
+                          Chunks: <strong>{transferDetail.chunkCount}</strong>
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -548,7 +628,9 @@ export function ClusterDashboard() {
                                       <span
                                         key={rep.nodeId}
                                         className={`replica-node-pill ${
-                                          nodeIsHealthy ? 'replica-pill-healthy' : 'replica-pill-down'
+                                          nodeIsHealthy
+                                            ? 'replica-pill-healthy'
+                                            : 'replica-pill-down'
                                         }`}
                                       >
                                         <span className="replica-node-name">{rep.nodeId}</span>
@@ -697,6 +779,62 @@ export function ClusterDashboard() {
             </div>
           )}
         </div>
+      </section>
+
+      {/* Demo Help & Outage Control Guidance Panel */}
+      <section className="cluster-demo-guide" aria-label="3-PC LAN Demo Controls">
+        <div
+          className="demo-guide-header"
+          role="button"
+          tabIndex={0}
+          onClick={() => setShowDemoGuide(!showDemoGuide)}
+          onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && setShowDemoGuide(!showDemoGuide)}
+        >
+          <div className="demo-guide-title">
+            <span>🎮 3-PC LAN Live Demo Instructions &amp; Terminal Controls</span>
+            <span className="demo-guide-badge">Zero Mocking · Real Processes</span>
+          </div>
+          <button type="button" className="demo-guide-toggle">
+            {showDemoGuide ? 'Hide Guide ▲' : 'Show Guide ▼'}
+          </button>
+        </div>
+
+        {showDemoGuide && (
+          <div className="demo-guide-body">
+            <div className="demo-step-card">
+              <div className="demo-step-number">STEP 1</div>
+              <div className="demo-step-title">Upload a File (PC A)</div>
+              <p className="demo-step-desc">
+                From the <strong>Transfers</strong> tab, upload any file. Watch it split into chunks and dual-replicate to both PC B (<code>node-1</code>) and PC C (<code>node-2</code>) on-disk.
+              </p>
+            </div>
+
+            <div className="demo-step-card">
+              <div className="demo-step-number">STEP 2</div>
+              <div className="demo-step-title">Simulate Storage Outage (PC B)</div>
+              <p className="demo-step-desc">
+                On PC B terminal, press <code>Ctrl+C</code> on the storage daemon process. Watch the dashboard update:
+                status turns to <span className="color-warn">UNHEALTHY</span> after 6s and <span className="color-error">UNAVAILABLE</span> after 12s, recording a <code>HEALTH_TRANSITION</code> event.
+              </p>
+            </div>
+
+            <div className="demo-step-card">
+              <div className="demo-step-number">STEP 3</div>
+              <div className="demo-step-title">Verify Seamless Failover Read</div>
+              <p className="demo-step-desc">
+                Download the file using your retrieval code. The coordinator detects PC B is offline and automatically streams the chunk replica from PC C. A <code>FAILOVER_READ</code> event appears in the timeline.
+              </p>
+            </div>
+
+            <div className="demo-step-card">
+              <div className="demo-step-number">STEP 4</div>
+              <div className="demo-step-title">Restore Node &amp; Observe Re-sync</div>
+              <p className="demo-step-desc">
+                On PC B terminal, restart the daemon (<code>pnpm run dev:node</code>). Once the next heartbeat arrives, status transitions back to <span className="color-success">HEALTHY</span> and the reconciler/recovery worker triggers automatically.
+              </p>
+            </div>
+          </div>
+        )}
       </section>
     </div>
   );

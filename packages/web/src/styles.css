@@ -2268,3 +2268,137 @@ input:focus-visible {
   }
 }
 
+/* ==========================================================================
+   Stale Telemetry Indicator & Outage Alert
+   ========================================================================== */
+.cluster-view-stale .metric-card,
+.cluster-view-stale .node-card {
+  opacity: 0.75;
+  filter: grayscale(0.2);
+  transition: opacity 0.3s ease, filter 0.3s ease;
+}
+
+.cluster-alert-warn {
+  background: rgba(251, 191, 36, 0.08);
+  border: 1px solid rgba(251, 191, 36, 0.3);
+  color: #fde68a;
+}
+
+.cluster-alert-title {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.cluster-alert-desc {
+  font-size: 0.8rem;
+  opacity: 0.85;
+  line-height: 1.4;
+}
+
+.alert-retry-btn {
+  margin-left: auto;
+  align-self: center;
+  font-size: 0.78rem;
+  padding: 6px 12px;
+  white-space: nowrap;
+}
+
+/* ==========================================================================
+   Demo Guide & Controls Panel
+   ========================================================================== */
+.cluster-demo-guide {
+  background: var(--surface-card);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+}
+
+.demo-guide-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  background: var(--surface-elevated);
+  cursor: pointer;
+  border-bottom: 1px solid var(--border-hairline);
+}
+
+.demo-guide-header:hover {
+  background: var(--surface-interactive);
+}
+
+.demo-guide-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.demo-guide-badge {
+  font-size: 0.68rem;
+  font-family: var(--font-mono);
+  background: rgba(228, 242, 34, 0.1);
+  color: var(--accent-lime);
+  border: 1px solid rgba(228, 242, 34, 0.25);
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+}
+
+.demo-guide-toggle {
+  background: transparent;
+  border: none;
+  font-size: 0.78rem;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+
+.demo-guide-body {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+  padding: 20px;
+}
+
+.demo-step-card {
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-input);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.demo-step-number {
+  font-size: 0.65rem;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--accent-lime);
+  letter-spacing: 0.08em;
+}
+
+.demo-step-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.demo-step-desc {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  line-height: 1.45;
+  margin: 0;
+}
+
+.demo-step-desc code {
+  background: var(--surface-interactive);
+  padding: 2px 5px;
+  border-radius: var(--radius-badge);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+
