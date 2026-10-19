@@ -1,4 +1,4 @@
-# VoidShare (DSFS)
+# VoidShare
 
 <div align="center">
 
@@ -11,7 +11,8 @@
 
 **Peer-Replicated, Zero-Knowledge Distributed File Storage with Transparent Read Failover, Consistent Hashing, and Autonomous Health Telemetry.**
 
-[![Build & Tests](https://img.shields.io/badge/tests-108%20passed-2ea44f.svg?style=flat-square)](docs/V1_IMPLEMENTATION_STATUS.md)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
+[![Build & Tests](https://img.shields.io/badge/tests-108%20passed-2ea44f.svg?style=flat-square)](#2-run-test-suite)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue.svg?style=flat-square&logo=typescript)](https://www.typescriptlang.org/)
 [![Fastify](https://img.shields.io/badge/Fastify-v5-000000.svg?style=flat-square&logo=fastify)](https://fastify.dev/)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg?style=flat-square&logo=react)](https://react.dev/)
@@ -34,7 +35,7 @@ Sleek glassmorphism upload wizard with in-browser WebCrypto AES-256-GCM chunking
 ![Send a File Wizard](docs/assets/upload-interface.png)
 
 ### 3. Capability-Based Code Retrieval
-Dual access modes: recipient can retrieve transfers using direct share links or unpadded 43-character URL-safe Base64 retrieval codes with pre-flight metadata preview.
+Dual access modes: recipients can retrieve transfers using direct share links or unpadded 43-character URL-safe Base64 retrieval codes with pre-flight metadata preview.
 ![Retrieval Code Access](docs/assets/retrieval-code.png)
 
 ### 4. Minimalist Dark Landing Interface
@@ -43,7 +44,7 @@ Intuitive split-intent entry mode with real-time cluster status banner and zero-
 
 ---
 
-## ⚡ Core Distributed Systems Highlights
+## ⚡ Key Features
 
 - **🔒 Client-Side Zero-Knowledge Encryption:** Files are partitioned into 4MiB blocks and encrypted client-side using AES-256-GCM with fresh 12-byte random IVs per chunk. The master secret stays exclusively in the client's URL fragment (`#secret`) or 43-character retrieval code (`vs1-...`); the coordinator and storage nodes never receive or store the encryption key.
 - **🔄 Consistent Ring Placement & Confirmed Dual Writes ($RF=2$):** Chunks are mapped across storage nodes using a consistent hash ring with virtual nodes. The coordinator enforces strict ingestion consistency: writes must be confirmed by **both** storage nodes before marking a chunk `STORED` and presenting the transfer as `READY`.
@@ -68,7 +69,7 @@ flowchart TD
         Code["43-Char Retrieval Code<br/>(Capability Hash)"]
     end
 
-    subgraph Coordinator["PC A: Coordinator (:8080)"]
+    subgraph Coordinator["Coordinator Service (:8080)"]
         API["Fastify API Server"]
         DB[(SQLite Metadata<br/>Ring + Replicas + Events)]
         Ring["Consistent Hash Ring (RF=2)"]
@@ -77,9 +78,9 @@ flowchart TD
         Sweeper["ExpirationSweeper & Reconciler"]
     end
 
-    subgraph StorageNodes["Independent Storage Daemons (:9001)"]
-        Node1["PC B: Storage Node 1<br/>- Encrypted Chunks<br/>- Heartbeat Emitter"]
-        Node2["PC C: Storage Node 2<br/>- Encrypted Chunks<br/>- Heartbeat Emitter"]
+    subgraph StorageNodes["Independent Storage Daemons (:9001, :9002)"]
+        Node1["Storage Node 1<br/>- Encrypted Chunks<br/>- Heartbeat Emitter"]
+        Node2["Storage Node 2<br/>- Encrypted Chunks<br/>- Heartbeat Emitter"]
     end
 
     UI -->|1. Encrypt Chunks Locally| Crypto
@@ -97,7 +98,7 @@ flowchart TD
 
 ## 📦 Monorepo Package Layout
 
-VoidShare is structured as an npm workspaces monorepo:
+VoidShare is organized as an npm workspaces monorepo:
 
 | Package | Path | Responsibility |
 |---|---|---|
@@ -109,7 +110,7 @@ VoidShare is structured as an npm workspaces monorepo:
 
 ---
 
-## 🚀 Quickstart & Local Development
+## 🚀 Getting Started
 
 ### Prerequisites
 - **Node.js:** v20.0.0 or higher (v24 recommended)
@@ -125,7 +126,7 @@ npm install
 ```
 
 ### 2. Run Test Suite
-Run the full test suite across all packages (21 test files, 108 tests):
+Run the full automated test suite across all packages (21 test files, 108 tests):
 ```bash
 npm test
 ```
@@ -136,91 +137,85 @@ Compile TypeScript across all workspaces and bundle the web client:
 npm run build
 ```
 
-### 4. Running a Local 3-Process Cluster (Single Machine)
-You can run a complete multi-node cluster on a single development machine:
+### 4. Running Locally (Single Machine Cluster)
+You can spin up a complete multi-node cluster on a single development machine:
 
 ```bash
-# Terminal 1: Run 2 Storage Daemons on ports 9001 and 9002
+# Terminal 1: Start 2 Storage Daemons on ports 9001 and 9002
 npm run dev:nodes
 
-# Terminal 2: Run Coordinator API on port 8080
+# Terminal 2: Start Coordinator API on port 8080
 npm run dev -w packages/api
 
-# Terminal 3: Run React Web UI on port 5173
+# Terminal 3: Start React Web UI on port 5173
 npm run dev -w packages/web
 ```
-Open **`http://localhost:5173`** in your browser to upload files, and **`http://localhost:5173/cluster`** to monitor cluster telemetry!
+- Open **`http://localhost:5173`** to access the web application.
+- Open **`http://localhost:5173/cluster`** to inspect the real-time cluster operations console.
 
 ---
 
-## 🌐 Three-PC Physical LAN Deployment
+## ⚙️ Configuration & Environment Variables
 
-For live distributed demonstrations across three separate physical computers:
+### Coordinator API (`packages/api/.env`)
+
+| Variable | Default | Description |
+|---|---|---|
+| `HOST` | `0.0.0.0` | Host interface to bind API server |
+| `PORT` | `8080` | Port for the Coordinator Fastify API |
+| `DB_PATH` | `./data/metadata.db` | Path to SQLite metadata database |
+| `STORAGE_NODES` | `node-1=http://localhost:9001,node-2=http://localhost:9002` | Comma-separated list of storage node endpoints |
+| `STORAGE_CLUSTER_SECRET` | *(required)* | Pre-shared 32-byte hex secret for internal service auth |
+| `HEALTH_MONITOR_INTERVAL_MS` | `2000` | Frequency of node health evaluation loop |
+| `HEARTBEAT_UNHEALTHY_MS` | `5000` | Heartbeat latency threshold to mark node `UNHEALTHY` |
+| `HEARTBEAT_UNAVAILABLE_MS` | `10000` | Heartbeat latency threshold to mark node `UNAVAILABLE` |
+
+### Storage Node (`packages/storage-node/.env`)
+
+| Variable | Default | Description |
+|---|---|---|
+| `NODE_ID` | `node-1` | Unique identifier for this storage daemon |
+| `HOST` | `0.0.0.0` | Host interface to bind chunk server |
+| `PORT` | `9001` | Storage daemon HTTP port |
+| `DATA_DIR` | `./data/node-1` | Local directory for storing encrypted chunks |
+| `COORDINATOR_URL` | `http://localhost:8080` | URL of the central Coordinator API |
+| `STORAGE_CLUSTER_SECRET` | *(required)* | Must match Coordinator's `STORAGE_CLUSTER_SECRET` |
+| `TOTAL_CAPACITY_BYTES` | `10737418240` | Total disk quota allocated for this node (10 GB) |
+| `HEARTBEAT_INTERVAL_MS` | `3000` | Frequency of heartbeat pings to Coordinator |
+
+---
+
+## 🌐 Multi-Node Distributed Deployment
+
+VoidShare can be deployed across multiple physical or virtual hosts on a network:
 
 ```
 +--------------------------------------------------------------+
-| PC A: COORDINATOR & WEB HOST                                 |
-| IP: 192.168.1.100                                            |
-| - Fastify API (:8080)                                        |
-| - Vite Web UI (:5173)                                        |
+| COORDINATOR & WEB HOST (Host 1)                             |
+| - Fastify API Server (:8080)                                 |
+| - Vite Web Dashboard (:5173)                                 |
 +--------------------------------------------------------------+
          |                                             |
          | Chunk Writes & Reads                        | Chunk Writes & Reads
          v                                             v
 +-------------------------------+             +-------------------------------+
-| PC B: STORAGE NODE 1          |             | PC C: STORAGE NODE 2          |
-| IP: 192.168.1.101             |             | IP: 192.168.1.102             |
+| STORAGE NODE 1 (Host 2)       |             | STORAGE NODE 2 (Host 3)       |
 | - Storage Daemon (:9001)      |             | - Storage Daemon (:9001)      |
 | - Data: ./data/node-1         |             | - Data: ./data/node-2         |
 +-------------------------------+             +-------------------------------+
 ```
 
-### Firewall Port Configuration (Windows PowerShell as Admin)
-
-```powershell
-# On PC A (Coordinator & Web):
-New-NetFirewallRule -DisplayName "VoidShare API (8080)" -Direction Inbound -LocalPort 8080 -Protocol TCP -Action Allow
-New-NetFirewallRule -DisplayName "VoidShare Web (5173)" -Direction Inbound -LocalPort 5173 -Protocol TCP -Action Allow
-
-# On PC B & PC C (Storage Nodes):
-New-NetFirewallRule -DisplayName "VoidShare Storage (9001)" -Direction Inbound -LocalPort 9001 -Protocol TCP -RemoteAddress 192.168.1.100 -Action Allow
-```
-
-👉 **Full Step-by-Step Setup Runbook:** See [`docs/LOCAL_DEMO.md`](docs/LOCAL_DEMO.md)  
-👉 **Physical Acceptance Checklist:** See [`docs/THREE_PC_ACCEPTANCE_CHECKLIST.md`](docs/THREE_PC_ACCEPTANCE_CHECKLIST.md)
+For firewall rules, networking requirements, and multi-machine setups, see the [Cluster Deployment Guide](docs/LOCAL_DEMO.md).
 
 ---
 
-## 🎬 5-Minute Live Presentation Walkthrough
+## 📚 Documentation
 
-Follow the structured demonstration runbook documented in [`docs/LOCAL_DEMO.md#section-8`](docs/LOCAL_DEMO.md#8-four-to-six-minute-live-presentation-walkthrough):
-
-1. **Initial Cluster Health (0:00 - 0:45):** Open `/cluster` on PC A. Show 2/2 nodes `HEALTHY`, fresh heartbeats < 2s, zero active operations.
-2. **Encrypted Ingestion (0:45 - 1:45):** Upload an 80MB file. Observe client-side chunking and dual replication writes to PC B and PC C.
-3. **Distribution Audit (1:45 - 2:30):** Inspect the transfer in `/cluster`. Verify chunks stored on both `node-1` and `node-2`. Show raw encrypted chunk files on storage disks.
-4. **Code Retrieval on Second PC (2:30 - 3:15):** On PC C, open web UI, enter the 43-character retrieval code, preview metadata, and download. Validate SHA-256 integrity matches original file.
-5. **Physical Node Crash & Seamless Failover (3:15 - 4:15):** Terminate storage process on PC B (`Ctrl+C`). Trigger a second download. Observe zero client errors as the coordinator fails over to PC C. Dashboard logs `READ_FAILOVER_SUCCEEDED` and flags PC B as `UNAVAILABLE`.
-6. **Recovery & Quota Cleanup (4:15 - 5:00):** Restart PC B. Heartbeat restores status to `HEALTHY`. Download quota exhausted transitions transfer to `CONSUMED`. Background sweeper purges chunks from all disks.
-
----
-
-## ⚠️ Known V1 Limitations & Trade-offs
-
-To maintain complete architectural honesty, the following constraints are documented for V1:
-
-1. **Two-Node Topology Constraint:** In a 2-node cluster with $RF=2$, if one node fails, the system **cannot re-replicate** the surviving chunk to another node because there is no third storage node available. The cluster operates in a degraded single-replica mode until the failed node recovers.
-2. **Trusted LAN Security Boundary:** Storage node chunk operations and heartbeats communicate over unencrypted HTTP using a shared symmetric bearer token (`STORAGE_CLUSTER_SECRET`). Production cloud deployment requires mutual TLS (mTLS) with X.509 certificates and private VPC networking.
-3. **Coordinator SPOF:** PC A hosts the Fastify API and SQLite database (`metadata.db`). Coordinator high availability (e.g. Raft consensus / LiteFS replication) is planned for V2.
-
----
-
-## 📚 Documentation Index
-
-- 📋 [V1 Implementation Status Tracker](docs/V1_IMPLEMENTATION_STATUS.md) — Comprehensive commit-by-commit verification log across all 9 phases.
-- 🚀 [3-PC Local Demo Runbook](docs/LOCAL_DEMO.md) — Full hardware setup instructions, firewall rules, and presentation speaker notes.
-- ✅ [3-PC Physical Acceptance Test Checklist](docs/THREE_PC_ACCEPTANCE_CHECKLIST.md) — Manual vs automated verification matrix.
-- 🛡️ [Security Specification](docs/SECURITY.md) — Threat model, cryptographic primitives, and credential boundaries.
-- 📐 [Architecture Reference](docs/ARCHITECTURE.md) — Storage layouts, API routes, and database schema documentation.
+- 📐 [Architecture Deep Dive](docs/ARCHITECTURE.md) — System topology, consistent hashing ring, and SQLite schema designs.
+- 🛡️ [Security Specification](docs/SECURITY.md) — AES-256-GCM zero-knowledge threat model and capability boundaries.
+- 🌐 [Distributed Systems Design](docs/DISTRIBUTED_SYSTEMS.md) — Replication quorum, failure detection algorithms, and reconciliation.
+- 📡 [API Specification](docs/API.md) — Complete REST endpoint reference and storage daemon protocols.
+- 🛠️ [Cluster Deployment Guide](docs/LOCAL_DEMO.md) — Multi-node deployment, firewall configurations, and operational troubleshooting.
 
 ---
 
