@@ -31,6 +31,9 @@ export function buildApiServer(
     'application/octet-stream',
     (_request, payload, done) => done(null, payload),
   );
+  app.addHook('onClose', async () => {
+    healthMonitor.stop();
+  });
   registerTransferRoutes(app, database, resolvedStorageClient, replicator, readService, options.rateLimiter);
   registerHealthRoutes(app, healthMonitor, {
     clusterSecret: options.clusterSecret,

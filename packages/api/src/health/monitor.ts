@@ -20,11 +20,46 @@ interface HealthThresholds {
 }
 
 export class HealthMonitor {
+  private timer: NodeJS.Timeout | null = null;
+  private isTicking = false;
+  private isRunning = false;
+
   public constructor(
     private readonly database: MetadataDatabase,
     private readonly clock: () => Date = () => new Date(),
     private readonly thresholds: HealthThresholds = { unhealthyAfterMs: 15_000, unavailableAfterMs: 60_000 },
   ) {}
+
+  public start(intervalMs = 2000): void {
+    if (this.isRunning) return;
+    this.isRunning = true;
+    this.timer = setInterval(() => {
+      if (this.isTicking) return;
+      this.isTicking = true;
+      try {
+        this.refresh();
+      } catch {
+        // Prevent transient errors from crashing monitor loop
+      } finally {
+        this.isTicking = false;
+      }
+    }, intervalMs);
+    if (this.timer && typeof this.timer.unref === 'function') {
+      this.timer.unref();
+    }
+  }
+
+  public stop(): void {
+    this.isRunning = false;
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = null;
+    }
+  }
+
+  public isStarted(): boolean {
+    return this.isRunning;
+  }
 
   public recordHeartbeat(input: HeartbeatInput): void {
     if (!Number.isSafeInteger(input.totalCapacityBytes) || input.totalCapacityBytes < 0 ||

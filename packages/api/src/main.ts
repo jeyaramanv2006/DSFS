@@ -6,6 +6,7 @@ import { PlacementService } from './placement/service.js';
 import { ReplicationService } from './replication/replication.js';
 import { HttpStorageNodeClient } from './services/storage-client.js';
 import { ReplicaReadService } from './replication/read-service.js';
+import { HealthMonitor } from './health/monitor.js';
 
 const databasePath = process.env.DB_PATH ?? './data/api.db';
 await mkdir(dirname(databasePath), { recursive: true });
@@ -32,12 +33,23 @@ const replicator = new ReplicationService(
   nodeTargets,
 );
 
+const unhealthyAfterMs = Number(process.env.HEARTBEAT_UNHEALTHY_MS ?? 6000);
+const unavailableAfterMs = Number(process.env.HEARTBEAT_UNAVAILABLE_MS ?? 12000);
+const healthMonitorIntervalMs = Number(process.env.HEALTH_MONITOR_INTERVAL_MS ?? 2000);
+
+const healthMonitor = new HealthMonitor(
+  database,
+  () => new Date(),
+  { unhealthyAfterMs, unavailableAfterMs },
+);
+healthMonitor.start(healthMonitorIntervalMs);
+
 const app = buildApiServer(
   database,
   nodeTargets[0]?.client ?? new HttpStorageNodeClient('http://localhost:9001', clusterSecret),
   replicator,
   new ReplicaReadService(database, nodeTargets),
-  undefined,
+  healthMonitor,
   {
     logger: true,
     clusterSecret,

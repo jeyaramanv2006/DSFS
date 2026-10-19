@@ -186,6 +186,9 @@ export class MetadataDatabase {
     activeOperations?: number;
     heartbeatAt?: string;
   }): void {
+    const defaultHeartbeat = input.status === 'UNAVAILABLE'
+      ? '1970-01-01T00:00:00.000Z'
+      : new Date().toISOString();
     this.db.prepare(`
       INSERT INTO storage_nodes (
         node_id, endpoint_url, status, total_capacity_bytes,
@@ -205,7 +208,7 @@ export class MetadataDatabase {
       input.totalCapacityBytes ?? 0,
       input.usedCapacityBytes ?? 0,
       input.activeOperations ?? 0,
-      input.heartbeatAt ?? new Date().toISOString(),
+      input.heartbeatAt ?? defaultHeartbeat,
     );
   }
 

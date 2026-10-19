@@ -32,4 +32,43 @@ describe('storage node health monitor', () => {
     expect(database.listStorageNodes()[0]).toMatchObject({ status: 'HEALTHY', total_capacity_bytes: 200, used_capacity_bytes: 20, active_operations: 2 });
     database.close();
   });
+
+  it('keeps boot-registered unavailable nodes unavailable until first heartbeat', () => {
+    const database = new MetadataDatabase();
+    database.registerStorageNode({ nodeId: 'node-1', endpointUrl: 'http://node-1:9001', status: 'UNAVAILABLE' });
+    const monitor = new HealthMonitor(database, () => new Date(), { unhealthyAfterMs: 6000, unavailableAfterMs: 12000 });
+
+    // Running refresh immediately must NOT promote node to HEALTHY
+    const transitions = monitor.refresh();
+    expect(transitions).toEqual([]);
+    expect(database.getStorageNode('node-1')?.status).toBe('UNAVAILABLE');
+
+    // First valid heartbeat sets it to HEALTHY
+    monitor.recordHeartbeat({
+      nodeId: 'node-1',
+      endpointUrl: 'http://node-1:9001',
+      totalCapacityBytes: 1000,
+      usedCapacityBytes: 50,
+      activeOperations: 0,
+    });
+    expect(database.getStorageNode('node-1')?.status).toBe('HEALTHY');
+    database.close();
+  });
+
+  it('manages timer start and stop lifecycle correctly', async () => {
+    const database = new MetadataDatabase();
+    const monitor = new HealthMonitor(database);
+    expect(monitor.isStarted()).toBe(false);
+
+    monitor.start(50);
+    expect(monitor.isStarted()).toBe(true);
+
+    // Multiple calls to start are idempotent
+    monitor.start(50);
+    expect(monitor.isStarted()).toBe(true);
+
+    monitor.stop();
+    expect(monitor.isStarted()).toBe(false);
+    database.close();
+  });
 });
