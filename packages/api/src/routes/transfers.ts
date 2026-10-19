@@ -75,7 +75,7 @@ function validateInitBody(body: Partial<InitBody>): asserts body is InitBody {
     chunkSizeBytes > 10 * 1024 * 1024 ||
     !ALLOWED_TTLS.has(body.ttlSeconds!) ||
     (body.maxDownloads !== undefined &&
-      (!Number.isSafeInteger(body.maxDownloads) || body.maxDownloads < 0)) ||
+      (!Number.isSafeInteger(body.maxDownloads) || body.maxDownloads <= 0)) ||
     (body.encryptedFileName !== undefined &&
       body.encryptedFileName !== null &&
       typeof body.encryptedFileName !== 'string')
