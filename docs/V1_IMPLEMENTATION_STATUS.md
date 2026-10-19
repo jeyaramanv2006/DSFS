@@ -12,8 +12,8 @@
 |---|---|:---:|:---:|---|
 | **Phase 0** | Repository Inventory & Baseline | 🟢 Done | 2 | `npm test` 62 passed, baseline inventory recorded |
 | **Phase 1** | Restore Build & Fix Critical Correctness | 🟢 Done | 4 | `npm test` 69 passed, `npm run build` PASS (all 5 workspaces) |
-| **Phase 2** | Three-PC LAN Configuration & Service Auth | 🔴 Not Started | 0 | Ready to proceed |
-| **Phase 3** | Heartbeats & Continuous Health Monitoring | 🔴 Not Started | 0 | Pending Phase 2 |
+| **Phase 2** | Three-PC LAN Configuration & Service Auth | 🟢 Done | 4 | `npm test` 72 passed, `npm run build` PASS, 3-PC setup guide added |
+| **Phase 3** | Heartbeats & Continuous Health Monitoring | 🔴 Not Started | 0 | Ready to proceed |
 | **Phase 4** | Replica Reads, Workers & Durability | 🔴 Not Started | 0 | Pending Phase 3 |
 | **Phase 5** | Retrieval Codes (with Share Links) | 🔴 Not Started | 0 | Pending Phase 4 |
 | **Phase 6** | Real Cluster Dashboard | 🔴 Not Started | 0 | Pending Phase 5 |
@@ -32,6 +32,10 @@
 | **Phase 1** | `6c6f1f2` | `fix(crypto): version filename ciphertext and randomize IV` | Added 12-byte random IV, envelope `0x01`, roundtrip/tamper/IV uniqueness tests | `crypto.test.ts`: 14/14 PASS; full `npm test`: 65/65 PASS | Rate limiter & quota fix |
 | **Phase 1** | `9e39c6d` | `fix(api): bound rate limiter state and quota edge cases` | Added `prune()`, auto-eviction to `RouteRateLimiter`; enforced `maxDownloads > 0` | `hardening.test.ts`: 4/4 PASS; full `npm test`: 67/67 PASS | Storage healthCheck perf |
 | **Phase 1** | `177ce81` | `perf(storage-node): avoid sequential disk stats on every health check` | Incremental capacity tracking on put/delete + directory reconcile on startup | `storage.test.ts`: 6/6 PASS; full `npm test`: 69/69 PASS; `npm run build`: PASS | Update tracker, prompt user |
+| **Phase 2** | `970f755` | `feat(config): support coordinator and LAN storage-node endpoints` | Environment-driven coordinator/storage addresses, host 0.0.0.0, `.env.example` templates | `npm run build`: PASS | Storage chunk auth |
+| **Phase 2** | `c41ffd8` | `feat(storage-node): authenticate internal chunk operations` | Added `timingSafeEqual` Bearer header auth on chunk routes with 401 on mismatch | `server.test.ts`: 4/4 PASS; negative auth verified | Heartbeat route auth |
+| **Phase 2** | `5ce4b29` | `feat(api): secure and validate node heartbeat registration` | Authenticated `/api/nodes/heartbeat`, rejected unknown nodes and endpoint changes | `routes.test.ts`: 4/4 PASS; full `npm test`: 72/72 PASS | Three-PC setup guide |
+| **Phase 2** | `711ce64` | `docs: document three-PC LAN setup and firewall rules` | Detailed network topology, Windows firewall commands, and startup runbook | Verified clean configs | Update tracker, prompt user |
 
 ---
 
@@ -54,12 +58,12 @@
 - [x] Verify full monorepo `npm run build` and `npm test` succeed (69 tests pass, all 5 packages build).
 
 ### Phase 2: Three-PC LAN Configuration & Service Auth
-- [ ] Environment-driven node and coordinator URLs (remove localhost assumptions).
-- [ ] `.env.example` templates for PC A, PC B, PC C with LAN IP placeholders.
-- [ ] Internal service auth using `STORAGE_CLUSTER_SECRET` on storage node endpoints.
-- [ ] Auth header verification on `POST /api/nodes/heartbeat` and node identity validation.
-- [ ] Resilient startup (unreachable nodes marked `UNAVAILABLE` without crashing API).
-- [ ] Automated auth negative and positive tests.
+- [x] Environment-driven node and coordinator URLs (remove localhost assumptions).
+- [x] `.env.example` templates for PC A, PC B, PC C with LAN IP placeholders (`config/`).
+- [x] Internal service auth using `STORAGE_CLUSTER_SECRET` on storage node endpoints.
+- [x] Auth header verification on `POST /api/nodes/heartbeat` and node identity validation.
+- [x] Resilient startup (unreachable nodes marked `UNAVAILABLE` without crashing API).
+- [x] Automated auth negative and positive tests (72 tests pass).
 
 ### Phase 3: Heartbeats & Health Monitoring
 - [ ] Storage node periodic heartbeat emitter with active operation tracking and backoff.
