@@ -59,7 +59,7 @@
 | **Phase 7** | `d50635a` | `docs: document three-PC acceptance test checklist and validation criteria` | Detailed manual 3-PC acceptance test checklist, automated test cross-reference, and physical verification matrix (`docs/THREE_PC_ACCEPTANCE_CHECKLIST.md`) | 3-PC acceptance checklist documented | Phase 7 complete |
 | **Phase 8** | `cac67d6` | `docs: add three-PC local demo startup runbook` | Network topology, port allocation, Windows Defender firewall commands, environment config, startup commands, and troubleshooting matrix | `docs/LOCAL_DEMO.md` sections 1–6 created | Architecture & walkthrough |
 | **Phase 8** | `8f00cf2` | `docs: add V1 architecture and presentation walkthrough` | Distributed data flow, zero-knowledge encryption, heartbeat thresholds, replica failover, 5-minute scripted presentation walkthrough with speaker notes, explicit 2-node limitations | `docs/LOCAL_DEMO.md` sections 7–9 added | Final verification evidence |
-| **Phase 8** | `84a082b` | `docs: record final V1 limitations and verification evidence` | Final V1 Exit Gate checklist verification, all phase commits confirmed, limitations documented | Complete V1 implementation signed off | Master Plan V1 Complete |
+| **Phase 8** | `d278a2d` | `docs: record final V1 limitations and verification evidence` | Final V1 Exit Gate checklist verification, all phase commits confirmed, limitations documented | Complete V1 implementation signed off | Master Plan V1 Complete |
 
 ---
 
