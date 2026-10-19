@@ -16,8 +16,8 @@
 | **Phase 3** | Heartbeats & Continuous Health Monitoring | 🟢 Done | 4 | `npm test` 81 passed, `npm run build` PASS across all workspaces |
 | **Phase 4** | Replica Reads, Workers & Durability | 🟢 Done | 4 | `npm test` 87 passed, `npm run build` PASS, 2-node outage & recovery integration tests verified |
 | **Phase 5** | Retrieval Codes (with Share Links) | 🟢 Done | 4 | `npm test` 97 passed, `npm run build` PASS, retrieval codes, capability resolution, dual entry verified |
-| **Phase 6** | Real Cluster Dashboard | 🔴 Not Started | 0 | Ready to proceed after approval |
-| **Phase 7** | End-to-End Verification & Hardening | 🔴 Not Started | 0 | Pending Phase 6 |
+| **Phase 6** | Real Cluster Dashboard | 🟢 Done | 4 | `npm test` 102 passed, `npm run build` PASS across all workspaces, live topology & event timeline verified |
+| **Phase 7** | End-to-End Verification & Hardening | 🔴 Not Started | 0 | Ready to proceed after approval |
 | **Phase 8** | Documentation & Presentation Runbook | 🔴 Not Started | 0 | Pending Phase 7 |
 
 ---
@@ -49,6 +49,10 @@
 | **Phase 5** | `f89a829` | `feat(api): resolve transfers using derived capability tokens` | Capability hash resolution, authenticated preview, ambiguous-match fail closed | `transfers.test.ts`: 15/15 PASS; full `npm test`: 95/95 PASS | Display code after upload |
 | **Phase 5** | `fa3877c` | `feat(web): display retrieval codes after upload` | Dual copy/display for Share Link and 43-char Retrieval Code with native share | `npm run build -w packages/web`: PASS | Retrieve-by-code flow |
 | **Phase 5** | `b6d9fbb` | `feat(web): add retrieve-by-code flow` | Tabbed link & code input, pre-download preview resolution, verified round-trip | `client.test.ts`: 4/4 PASS; `npm test`: 97/97 PASS; `npm run build`: PASS | Phase 5 complete |
+| **Phase 6** | `b6addd5` | `feat(api): expose sanitized cluster overview and node metrics` | Implemented `/api/cluster/overview`, `nodes`, `transfers`, `transfers/:id/chunks`, `events` | `cluster.test.ts`: 5/5 PASS; full `npm test`: 102/102 PASS; sanitized schemas verified | Frontend summary & node cards |
+| **Phase 6** | `a5988cb` | `feat(web): add live cluster summary and node status view` | `/cluster` navigation, cluster summary metrics cards, real-time node status grid | `npm run build -w packages/web`: PASS; live 2s polling verified | Chunk placement & event timeline |
+| **Phase 6** | `15bf75a` | `feat(web): show replica placement and event timeline` | Transfer selector, per-chunk replica breakdown table, scrollable real event timeline | `npm run build -w packages/web`: PASS; live events & replica table verified | Stale handling & demo guide |
+| **Phase 6** | `545d080` | `fix(web): handle stale monitoring data and node outages` | Stale indicator, disconnect sticky banner, node outage failover callout, demo guide panel | `npm run build`: PASS; `npm test`: 102/102 PASS | Phase 6 complete |
 
 ---
 
@@ -101,11 +105,11 @@
 - [x] Retrieve-by-code entry mode with decryption (`b6d9fbb`).
 
 ### Phase 6: Real Cluster Dashboard
-- [ ] Sanitized backend observability endpoints (`/api/cluster/overview`, `nodes`, `transfers`, `events`).
-- [ ] Persisted `cluster_events` table and timeline API.
-- [ ] Dedicated `/cluster` dashboard route in frontend.
-- [ ] Live node cards, storage usage, chunk placement, and event stream.
-- [ ] Polling lifecycle and error/stale data handling.
+- [x] Sanitized backend observability endpoints (`/api/cluster/overview`, `nodes`, `transfers`, `transfers/:id/chunks`, `events`) (`b6addd5`).
+- [x] Persisted `cluster_events` table and timeline API (`b6addd5`).
+- [x] Dedicated `/cluster` dashboard route in frontend (`a5988cb`).
+- [x] Live node cards, storage usage, chunk placement, and event stream (`a5988cb`, `15bf75a`).
+- [x] Polling lifecycle, concurrency protection, disconnect recovery, and stale data handling (`545d080`).
 
 ### Phase 7: End-to-End Verification & Hardening
 - [ ] Automated integration tests covering full lifecycle.
