@@ -37,7 +37,13 @@ export interface CliUploadResult {
 export async function uploadBytes(
   baseUrl: string,
   plaintext: Uint8Array,
-  options: { fileName?: string; secret?: string; chunkSizeBytes?: number; ttlSeconds?: number } = {},
+  options: {
+    fileName?: string;
+    secret?: string;
+    chunkSizeBytes?: number;
+    ttlSeconds?: number;
+    maxDownloads?: number;
+  } = {},
 ): Promise<CliUploadResult> {
   const secret = options.secret ?? generateSecret();
   const chunkSizeBytes = options.chunkSizeBytes ?? 4 * 1024 * 1024;
@@ -58,7 +64,7 @@ export async function uploadBytes(
       chunkSizeBytes: chunkSizeBytes + CHUNK_OVERHEAD_BYTES,
       encryptedFileName: options.fileName ? await encryptFilename(options.fileName, secret) : null,
       ttlSeconds: options.ttlSeconds ?? 600,
-      maxDownloads: 1,
+      maxDownloads: options.maxDownloads ?? 1,
     }),
   })).then((response) => response.json());
 
