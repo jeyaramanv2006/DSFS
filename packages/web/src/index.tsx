@@ -86,8 +86,15 @@ function parseLinkInput(input: string): { fileId: string; secret: string } | nul
 function parseRouteFromUrl(): { mode: AppMode; fileId: string | null } {
   if (typeof window === 'undefined') return { mode: 'home', fileId: null };
   const path = window.location.pathname;
-  if (path === '/cluster' || path === '/admin/cluster') {
+  const search = window.location.search;
+  if (path === '/cluster' || path === '/admin/cluster' || search.includes('mode=cluster')) {
     return { mode: 'cluster', fileId: null };
+  }
+  if (path === '/send' || search.includes('mode=send')) {
+    return { mode: 'send', fileId: null };
+  }
+  if (path === '/download' || search.includes('mode=download')) {
+    return { mode: 'download', fileId: null };
   }
   const match = path.match(/^\/download\/([a-f0-9]{32})$/i);
   if (match?.[1]) {
@@ -952,7 +959,9 @@ function DownloadFlow({
   onBackToHome: () => void;
 }) {
   const initialSecret = typeof window !== 'undefined' ? window.location.hash.slice(1) : '';
-  const [entryTab, setEntryTab] = useState<'link' | 'code'>('link');
+  const [entryTab, setEntryTab] = useState<'link' | 'code'>(
+    typeof window !== 'undefined' && window.location.search.includes('tab=code') ? 'code' : 'link',
+  );
   const [linkInput, setLinkInput] = useState<string>(
     initialFileId && initialSecret ? `${window.location.origin}/download/${initialFileId}#${initialSecret}` : '',
   );
