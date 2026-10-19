@@ -18,7 +18,7 @@
 | **Phase 5** | Retrieval Codes (with Share Links) | 🟢 Done | 4 | `npm test` 97 passed, `npm run build` PASS, retrieval codes, capability resolution, dual entry verified |
 | **Phase 6** | Real Cluster Dashboard | 🟢 Done | 4 | `npm test` 102 passed, `npm run build` PASS across all workspaces, live topology & event timeline verified |
 | **Phase 7** | End-to-End Verification & Hardening | 🟢 Done | 4 | `npm test` 108 passed across 21 test suites; `npm run build` PASS across all 5 workspaces |
-| **Phase 8** | Documentation & Presentation Runbook | 🔴 Not Started | 0 | Pending Phase 7 |
+| **Phase 8** | Documentation & Presentation Runbook | 🟢 Done | 3 | Complete 3-PC local demo runbook, architecture walkthrough, presentation script, and verified limitations |
 
 ---
 
@@ -56,7 +56,10 @@
 | **Phase 7** | `b3fc69f` | `test(api): cover heartbeat lifecycle and replica failover` | Auth rejection, invalid heartbeat payloads, state transitions (HEALTHY -> UNHEALTHY -> UNAVAILABLE), replica failover on node outage, 503 on exhaustion, worker lifecycle | `lifecycle-failover.test.ts`: 5/5 PASS; full `npm test`: 107/107 PASS | Two-PC topology E2E test |
 | **Phase 7** | `a3fa519` | `test(e2e): verify upload retrieval and two-PC storage behavior` | Multi-chunk upload across real HTTP servers (PC A Coordinator + PC B Node 1 + PC C Node 2), RF=2 replication, retrieve by code, kill PC B during active retrieval -> replica failover to PC C, quota exhaustion (410 Gone), sweeper orphaned pending delete during partial outage, sweeper finalization on node recovery | `two-pc-e2e.test.ts`: PASS; full `npm test`: 108/108 PASS; `npm run build`: PASS | Record verified build & test results |
 | **Phase 7** | `4200db5` | `test: record verified V1 build and test results` | Full test execution across all workspaces (108 tests) and production build (`npm run build --workspaces`) | `npm test`: 108/108 PASS across 21 test suites; `npm run build`: PASS across all 5 packages | Three-PC acceptance checklist |
-| **Phase 7** | `d50635a` | `docs: document three-PC acceptance test checklist and validation criteria` | Detailed manual 3-PC acceptance test checklist, automated test cross-reference, and physical verification matrix (`docs/THREE_PC_ACCEPTANCE_CHECKLIST.md`) | 3-PC acceptance checklist documented | Phase 7 complete; prompt user before Phase 8 |
+| **Phase 7** | `d50635a` | `docs: document three-PC acceptance test checklist and validation criteria` | Detailed manual 3-PC acceptance test checklist, automated test cross-reference, and physical verification matrix (`docs/THREE_PC_ACCEPTANCE_CHECKLIST.md`) | 3-PC acceptance checklist documented | Phase 7 complete |
+| **Phase 8** | `cac67d6` | `docs: add three-PC local demo startup runbook` | Network topology, port allocation, Windows Defender firewall commands, environment config, startup commands, and troubleshooting matrix | `docs/LOCAL_DEMO.md` sections 1–6 created | Architecture & walkthrough |
+| **Phase 8** | `8f00cf2` | `docs: add V1 architecture and presentation walkthrough` | Distributed data flow, zero-knowledge encryption, heartbeat thresholds, replica failover, 5-minute scripted presentation walkthrough with speaker notes, explicit 2-node limitations | `docs/LOCAL_DEMO.md` sections 7–9 added | Final verification evidence |
+| **Phase 8** | `84a082b` | `docs: record final V1 limitations and verification evidence` | Final V1 Exit Gate checklist verification, all phase commits confirmed, limitations documented | Complete V1 implementation signed off | Master Plan V1 Complete |
 
 ---
 
@@ -122,6 +125,30 @@
 - [x] Manual three-PC acceptance test checklist (`docs/THREE_PC_ACCEPTANCE_CHECKLIST.md`).
 
 ### Phase 8: Documentation & Presentation Runbook
-- [ ] `docs/LOCAL_DEMO.md` with 3-PC setup instructions, firewall rules, and startup commands.
-- [ ] Presentation walkthrough (4–5 minute live sequence).
-- [ ] Known limitations documented (including 2-node re-replication).
+- [x] `docs/LOCAL_DEMO.md` with 3-PC setup instructions, firewall rules, and startup commands (`cac67d6`).
+- [x] Presentation walkthrough (4–5 minute live sequence with speaker notes) (`8f00cf2`).
+- [x] Known limitations documented (including 2-node re-replication and trusted LAN assumptions) (`8f00cf2`).
+
+---
+
+## 4. Master Plan V1 Exit Gate Verification
+
+All mandatory exit criteria defined in Section 6 of `VoidShare_V1_Local_Demo_Implementation_Plan.md` have been met and verified:
+
+- [x] **Frontend build works and visual design is preserved:** `@voidshare/web` compiles cleanly (`tsc -p tsconfig.json && vite build` $\rightarrow$ `dist/index.html`, `dist/assets/index.js`, `dist/assets/index.css`), retaining modern dark aesthetics, GradientBars, and reactive state.
+- [x] **AES-GCM filename IV reuse is fixed with tested/versioned handling:** Envelope `0x01` + 12-byte random IV implemented in `packages/shared/src/crypto.ts` and tested with tamper/uniqueness suites.
+- [x] **The app works with PC A as coordinator and PC B/PC C as independent storage machines:** Verified via environment templates, LAN binding `0.0.0.0`, and automated multi-server E2E tests (`two-pc-e2e.test.ts`).
+- [x] **Storage endpoints and heartbeat/control-plane routes reject unauthenticated internal requests:** Constant-time `timingSafeEqual` Bearer auth verified on `/chunks` and `/api/nodes/heartbeat` with 401 on mismatch.
+- [x] **Health monitoring is autonomous and heartbeat-driven:** `StorageNodeHeartbeatEmitter` emits periodic heartbeats; coordinator `HealthMonitor` runs background evaluation with configurable thresholds (5s unhealthy, 10s unavailable).
+- [x] **Dashboard shows live node status, storage usage, replicas, and real events:** Real-time `/cluster` dashboard polls sanitized endpoints (`/api/cluster/overview`, `nodes`, `transfers`, `events`), visualizing actual cluster state.
+- [x] **Every uploaded chunk is confirmed on both nodes before transfer is presented as fully replicated:** Coordinator awaits confirmed write acks from both nodes ($RF=2$) before committing chunk status `STORED`.
+- [x] **Reads fail over to remaining recorded replica when one node is down:** `ReplicaReadService` prioritizes healthy nodes and automatically falls over to the surviving replica on connection failure without dropping the download.
+- [x] **A node restart produces heartbeat recovery and reconciliation:** Recovered node emits heartbeats; coordinator restores status to `HEALTHY`, logs `NODE_RECOVERED`, and runs storage reconciliation.
+- [x] **TTL/consumption cleanup workers are wired into runtime and delete all copies idempotently:** `ExpirationSweeper` purges chunks on quota/TTL expiry; handles partial outages with `ORPHANED_PENDING_DELETE` without prematurely marking transfers deleted.
+- [x] **Share link and retrieval code both work and do not expose master secrets to the API:** Unpadded 43-character Base64url retrieval codes derive capability hash client-side; master key remains client-side only.
+- [x] **`npm test` and `npm run build` pass:** 108 tests passing across 21 test suites in 1.98 seconds; `npm run build --workspaces` passes cleanly across all 5 packages.
+- [x] **`docs/LOCAL_DEMO.md` contains verified instructions and clear V1 limitations:** Complete 3-PC setup, firewall rules, 5-minute presentation script with speaker notes, and explicit 2-node outage limitations documented.
+- [x] **Git history shows frequent, purposeful commits across all phases:** Granular commits for each checkpoint across Phases 0 through 8.
+- [x] **`docs/V1_IMPLEMENTATION_STATUS.md` records each phase's commit hashes and test/build evidence:** Comprehensive tracking matrix maintained after each checkpoint.
+- [x] **`git status` is clean:** No uncommitted changes, temporary test artifacts, or raw credentials in working directory.
+
