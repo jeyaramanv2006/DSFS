@@ -15,8 +15,8 @@
 | **Phase 2** | Three-PC LAN Configuration & Service Auth | 🟢 Done | 4 | `npm test` 72 passed, `npm run build` PASS, 3-PC setup guide added |
 | **Phase 3** | Heartbeats & Continuous Health Monitoring | 🟢 Done | 4 | `npm test` 81 passed, `npm run build` PASS across all workspaces |
 | **Phase 4** | Replica Reads, Workers & Durability | 🟢 Done | 4 | `npm test` 87 passed, `npm run build` PASS, 2-node outage & recovery integration tests verified |
-| **Phase 5** | Retrieval Codes (with Share Links) | 🔴 Not Started | 0 | Ready to proceed after approval |
-| **Phase 6** | Real Cluster Dashboard | 🔴 Not Started | 0 | Pending Phase 5 |
+| **Phase 5** | Retrieval Codes (with Share Links) | 🟢 Done | 4 | `npm test` 97 passed, `npm run build` PASS, retrieval codes, capability resolution, dual entry verified |
+| **Phase 6** | Real Cluster Dashboard | 🔴 Not Started | 0 | Ready to proceed after approval |
 | **Phase 7** | End-to-End Verification & Hardening | 🔴 Not Started | 0 | Pending Phase 6 |
 | **Phase 8** | Documentation & Presentation Runbook | 🔴 Not Started | 0 | Pending Phase 7 |
 
@@ -45,6 +45,10 @@
 | **Phase 4** | `71d2145` | `fix(api): report replication only after both required acks and checksum validation` | Enforced strict `RF=2` replica acks before marking chunks `STORED` | `transfers.test.ts`: 12/12 PASS; negative/partial tests PASS | Background workers |
 | **Phase 4** | `8a342a2` | `feat(api): schedule expiry-cleanup, reconciler, and recovery workers at startup` | Created `WorkerManager` to orchestrate cleanup, reconciliation, and recovery | `workers/manager.test.ts`: 3/3 PASS; full `npm test`: 86/86 PASS | Two-node outage integration test |
 | **Phase 4** | `af34fec` | `test(api): verify two-node outage, failover, and restoration behavior` | Comprehensive outage test suite verifying 2-node limits, failover, data intactness | `recovery/two-node-outage.test.ts`: PASS; full `npm test`: 87/87 PASS | Phase 4 complete |
+| **Phase 5** | `2a6e5ed` | `feat(shared): add retrieval-code encoding and validation` | Added unpadded 43-char URL-safe Base64 encoder/decoder, validation, normalization | `crypto.test.ts`: 19/19 PASS; `npm test`: 92/92 PASS | Capability token resolution |
+| **Phase 5** | `f89a829` | `feat(api): resolve transfers using derived capability tokens` | Capability hash resolution, authenticated preview, ambiguous-match fail closed | `transfers.test.ts`: 15/15 PASS; full `npm test`: 95/95 PASS | Display code after upload |
+| **Phase 5** | `fa3877c` | `feat(web): display retrieval codes after upload` | Dual copy/display for Share Link and 43-char Retrieval Code with native share | `npm run build -w packages/web`: PASS | Retrieve-by-code flow |
+| **Phase 5** | `b6d9fbb` | `feat(web): add retrieve-by-code flow` | Tabbed link & code input, pre-download preview resolution, verified round-trip | `client.test.ts`: 4/4 PASS; `npm test`: 97/97 PASS; `npm run build`: PASS | Phase 5 complete |
 
 ---
 
@@ -90,11 +94,11 @@
 - [x] Two-node outage and recovery tests asserting RF=2 limitation (`af34fec`).
 
 ### Phase 5: Retrieval Codes
-- [ ] Unpadded URL-safe Base64 encoding/decoding for 32-byte secret (43 chars).
-- [ ] Strict code format validation.
-- [ ] Capability-based transfer resolution and preview endpoint.
-- [ ] Frontend display of retrieval code alongside share link.
-- [ ] Retrieve-by-code entry mode with decryption.
+- [x] Unpadded URL-safe Base64 encoding/decoding for 32-byte secret (43 chars) (`2a6e5ed`).
+- [x] Strict code format validation (`2a6e5ed`).
+- [x] Capability-based transfer resolution and preview endpoint (`f89a829`).
+- [x] Frontend display of retrieval code alongside share link (`fa3877c`).
+- [x] Retrieve-by-code entry mode with decryption (`b6d9fbb`).
 
 ### Phase 6: Real Cluster Dashboard
 - [ ] Sanitized backend observability endpoints (`/api/cluster/overview`, `nodes`, `transfers`, `events`).
