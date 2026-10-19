@@ -39,6 +39,14 @@ interface StatusParams {
   fileId: string;
 }
 
+interface ResolveBody {
+  authToken?: string;
+}
+
+interface PreviewParams {
+  fileId: string;
+}
+
 interface AccessParams { fileId: string; }
 interface DownloadChunkParams { fileId: string; index: string; }
 
@@ -119,6 +127,9 @@ export function registerTransferRoutes(
     } catch (error) {
       if (error instanceof Error && error.message === 'invalid transfer initialization') {
         return reply.code(400).send({ error: 'VALIDATION_ERROR' });
+      }
+      if (error instanceof Error && error.message === 'DUPLICATE_CAPABILITY') {
+        return reply.code(409).send({ error: 'DUPLICATE_CAPABILITY' });
       }
       throw error;
     }
@@ -252,6 +263,103 @@ export function registerTransferRoutes(
       expiresAt: transfer.expires_at,
     });
   });
+
+  app.post<{ Body: ResolveBody }>(
+    '/api/transfers/resolve',
+    { preHandler: rateLimit(limiter, 'access') },
+    async (request, reply) => {
+      let token = bearerToken(request.headers.authorization);
+      if (!token && typeof request.body?.authToken === 'string' && isTokenHex(request.body.authToken)) {
+        token = request.body.authToken;
+      }
+      if (!token) {
+        return reply.code(404).send({ error: 'TRANSFER_NOT_FOUND' });
+      }
+
+      const capabilityHash = hashToken(token);
+      const match = database.resolveTransferByCapability(capabilityHash);
+
+      if (match === 'AMBIGUOUS') {
+        database.recordClusterEvent({
+          eventType: 'CAPABILITY_LOOKUP_AMBIGUOUS',
+          severity: 'ERROR',
+          details: { reason: 'multiple transfers matched capability hash' },
+        });
+        return reply.code(404).send({ error: 'TRANSFER_NOT_FOUND' });
+      }
+
+      if (!match) {
+        return reply.code(404).send({ error: 'TRANSFER_NOT_FOUND' });
+      }
+
+      const nowIso = new Date().toISOString();
+      if (
+        match.expires_at <= nowIso ||
+        ['EXPIRED', 'CONSUMED', 'DELETING', 'DELETED'].includes(match.status) ||
+        match.download_count >= match.max_downloads
+      ) {
+        return reply.code(410).send({ error: 'TRANSFER_GONE' });
+      }
+
+      if (match.status !== 'READY' && match.status !== 'DOWNLOADING') {
+        return reply.code(404).send({ error: 'TRANSFER_NOT_FOUND' });
+      }
+
+      return reply.code(200).send({
+        fileId: match.file_id,
+        status: match.status,
+        totalSizeBytes: match.total_size_bytes,
+        chunkCount: match.chunk_count,
+        chunkSizeBytes: match.chunk_size_bytes,
+        encryptedFileName: match.original_name_encrypted,
+        expiresAt: match.expires_at,
+        downloadCount: match.download_count,
+        maxDownloads: match.max_downloads,
+      });
+    },
+  );
+
+  app.get<{ Params: PreviewParams }>(
+    '/api/transfers/:fileId/preview',
+    { preHandler: rateLimit(limiter, 'access') },
+    async (request, reply) => {
+      const token = bearerToken(request.headers.authorization);
+      if (!token) {
+        return reply.code(404).send({ error: 'TRANSFER_NOT_FOUND' });
+      }
+
+      const transfer = database.getTransfer(request.params.fileId);
+      const capabilityHash = hashToken(token);
+      if (!transfer || !tokensEqual(capabilityHash, transfer.capability_hash)) {
+        return reply.code(404).send({ error: 'TRANSFER_NOT_FOUND' });
+      }
+
+      const nowIso = new Date().toISOString();
+      if (
+        transfer.expires_at <= nowIso ||
+        ['EXPIRED', 'CONSUMED', 'DELETING', 'DELETED'].includes(transfer.status) ||
+        transfer.download_count >= transfer.max_downloads
+      ) {
+        return reply.code(410).send({ error: 'TRANSFER_GONE' });
+      }
+
+      if (transfer.status !== 'READY' && transfer.status !== 'DOWNLOADING') {
+        return reply.code(404).send({ error: 'TRANSFER_NOT_FOUND' });
+      }
+
+      return reply.code(200).send({
+        fileId: transfer.file_id,
+        status: transfer.status,
+        totalSizeBytes: transfer.total_size_bytes,
+        chunkCount: transfer.chunk_count,
+        chunkSizeBytes: transfer.chunk_size_bytes,
+        encryptedFileName: transfer.original_name_encrypted,
+        expiresAt: transfer.expires_at,
+        downloadCount: transfer.download_count,
+        maxDownloads: transfer.max_downloads,
+      });
+    },
+  );
 
   app.post<{ Params: AccessParams }>('/api/transfers/:fileId/access', { preHandler: rateLimit(limiter, 'access') }, async (request, reply) => {
     const token = bearerToken(request.headers.authorization);

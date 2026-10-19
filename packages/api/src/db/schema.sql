@@ -22,6 +22,9 @@ CREATE TABLE IF NOT EXISTS transfers (
 CREATE INDEX IF NOT EXISTS idx_transfers_status_expires_at
   ON transfers(status, expires_at);
 
+CREATE INDEX IF NOT EXISTS idx_transfers_capability_hash
+  ON transfers(capability_hash);
+
 CREATE TABLE IF NOT EXISTS chunks (
   chunk_id TEXT PRIMARY KEY,
   file_id TEXT NOT NULL REFERENCES transfers(file_id) ON DELETE CASCADE,

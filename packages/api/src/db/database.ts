@@ -112,6 +112,13 @@ export class MetadataDatabase {
     const fileId = createFileId();
     const uploadToken = createToken();
     const expiresAt = new Date(Date.now() + input.ttlSeconds * 1000).toISOString();
+    const capabilityHash = hashToken(input.authToken);
+
+    const existing = this.db.prepare('SELECT file_id FROM transfers WHERE capability_hash = ?').get(capabilityHash);
+    if (existing) {
+      throw new Error('DUPLICATE_CAPABILITY');
+    }
+
     this.db.prepare(`
       INSERT INTO transfers (
         file_id, capability_hash, upload_session_hash, original_name_encrypted,
@@ -122,7 +129,7 @@ export class MetadataDatabase {
         @maxDownloads, @expiresAt)
     `).run({
       fileId,
-      capabilityHash: hashToken(input.authToken),
+      capabilityHash,
       uploadSessionHash: hashToken(uploadToken),
       encryptedFileName: input.encryptedFileName,
       totalSizeBytes: input.totalSizeBytes,
@@ -137,6 +144,20 @@ export class MetadataDatabase {
 
   public getTransfer(fileId: string): TransferRow | undefined {
     return this.db.prepare('SELECT * FROM transfers WHERE file_id = ?').get(fileId) as TransferRow | undefined;
+  }
+
+  public resolveTransferByCapability(capabilityHash: string): TransferRow | 'AMBIGUOUS' | undefined {
+    const rows = this.db.prepare(
+      'SELECT * FROM transfers WHERE capability_hash = ?',
+    ).all(capabilityHash) as TransferRow[];
+
+    if (rows.length === 0) {
+      return undefined;
+    }
+    if (rows.length > 1) {
+      return 'AMBIGUOUS';
+    }
+    return rows[0];
   }
 
   public recordStoredChunk(fileId: string, chunkIndex: number, result: StoredChunkResult): { chunkId: string } {

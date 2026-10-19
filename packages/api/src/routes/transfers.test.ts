@@ -463,4 +463,179 @@ describe('POST /api/transfers', () => {
     expect(events).toHaveLength(1);
     expect(events[0].severity).toBe('WARN');
   });
+
+  it('rejects duplicate authToken on init with 409 DUPLICATE_CAPABILITY', async () => {
+    database = new MetadataDatabase();
+    app = buildApiServer(database);
+
+    const first = await app.inject({
+      method: 'POST',
+      url: '/api/transfers',
+      payload: { authToken, totalSizeBytes: 10, chunkCount: 1, ttlSeconds: 600 },
+    });
+    expect(first.statusCode).toBe(201);
+
+    const second = await app.inject({
+      method: 'POST',
+      url: '/api/transfers',
+      payload: { authToken, totalSizeBytes: 10, chunkCount: 1, ttlSeconds: 600 },
+    });
+    expect(second.statusCode).toBe(409);
+    expect(second.json()).toEqual({ error: 'DUPLICATE_CAPABILITY' });
+  });
+
+  it('resolves transfers safely via POST /api/transfers/resolve without consuming quota', async () => {
+    database = new MetadataDatabase();
+    const fakeClient = new FakeStorageNodeClient();
+    app = buildApiServer(database, fakeClient);
+
+    // Initialize, upload, and finalize transfer
+    const init = await app.inject({
+      method: 'POST',
+      url: '/api/transfers',
+      payload: {
+        authToken,
+        totalSizeBytes: 5,
+        chunkCount: 1,
+        ttlSeconds: 600,
+        maxDownloads: 1,
+        encryptedFileName: 'encrypted-filename-blob',
+      },
+    });
+    const initialized = init.json();
+    const content = Buffer.from('hello');
+    const checksum = createHash('sha256').update(content).digest('hex');
+
+    await app.inject({
+      method: 'PUT',
+      url: `/api/transfers/${initialized.fileId}/chunks/0`,
+      headers: {
+        authorization: `Bearer ${initialized.uploadToken}`,
+        'content-type': 'application/octet-stream',
+        'x-chunk-checksum-sha256': checksum,
+      },
+      payload: content,
+    });
+    await app.inject({
+      method: 'POST',
+      url: `/api/transfers/${initialized.fileId}/finalize`,
+      headers: { authorization: `Bearer ${initialized.uploadToken}` },
+      payload: { totalChunksUploaded: 1 },
+    });
+
+    // 1. Resolve via Authorization Bearer header
+    const resolveRes = await app.inject({
+      method: 'POST',
+      url: '/api/transfers/resolve',
+      headers: { authorization: `Bearer ${authToken}` },
+    });
+    expect(resolveRes.statusCode).toBe(200);
+    const resolved = resolveRes.json();
+    expect(resolved).toEqual({
+      fileId: initialized.fileId,
+      status: 'READY',
+      totalSizeBytes: 5,
+      chunkCount: 1,
+      chunkSizeBytes: 4 * 1024 * 1024,
+      encryptedFileName: 'encrypted-filename-blob',
+      expiresAt: initialized.expiresAt,
+      downloadCount: 0,
+      maxDownloads: 1,
+    });
+    // Ensure no secrets leaked
+    expect(resolved.authToken).toBeUndefined();
+    expect(resolved.capability_hash).toBeUndefined();
+    expect(resolved.upload_session_hash).toBeUndefined();
+    expect(resolved.downloadToken).toBeUndefined();
+
+    // Verify lease was not acquired and download quota was not touched
+    const transferRow = database.getTransfer(initialized.fileId)!;
+    expect(transferRow.status).toBe('READY');
+    expect(transferRow.download_count).toBe(0);
+    expect(transferRow.download_lease_until).toBeNull();
+
+    // 2. Resolve via body authToken
+    const resolveBodyRes = await app.inject({
+      method: 'POST',
+      url: '/api/transfers/resolve',
+      payload: { authToken },
+    });
+    expect(resolveBodyRes.statusCode).toBe(200);
+    expect(resolveBodyRes.json().fileId).toBe(initialized.fileId);
+
+    // 3. Unknown token fails safely with 404
+    const unknownToken = '1111111111111111111111111111111111111111111111111111111111111111';
+    const unknownRes = await app.inject({
+      method: 'POST',
+      url: '/api/transfers/resolve',
+      headers: { authorization: `Bearer ${unknownToken}` },
+    });
+    expect(unknownRes.statusCode).toBe(404);
+    expect(unknownRes.json()).toEqual({ error: 'TRANSFER_NOT_FOUND' });
+
+    // 4. Preview via GET /api/transfers/:fileId/preview
+    const previewRes = await app.inject({
+      method: 'GET',
+      url: `/api/transfers/${initialized.fileId}/preview`,
+      headers: { authorization: `Bearer ${authToken}` },
+    });
+    expect(previewRes.statusCode).toBe(200);
+    expect(previewRes.json()).toEqual(resolved);
+
+    // Preview with wrong token returns 404
+    const wrongPreviewRes = await app.inject({
+      method: 'GET',
+      url: `/api/transfers/${initialized.fileId}/preview`,
+      headers: { authorization: `Bearer ${unknownToken}` },
+    });
+    expect(wrongPreviewRes.statusCode).toBe(404);
+
+    // 5. Expired transfer returns 410 GONE on resolve and preview
+    database.db.prepare("UPDATE transfers SET expires_at = '2000-01-01T00:00:00.000Z' WHERE file_id = ?").run(initialized.fileId);
+
+    const expiredResolve = await app.inject({
+      method: 'POST',
+      url: '/api/transfers/resolve',
+      headers: { authorization: `Bearer ${authToken}` },
+    });
+    expect(expiredResolve.statusCode).toBe(410);
+    expect(expiredResolve.json()).toEqual({ error: 'TRANSFER_GONE' });
+
+    const expiredPreview = await app.inject({
+      method: 'GET',
+      url: `/api/transfers/${initialized.fileId}/preview`,
+      headers: { authorization: `Bearer ${authToken}` },
+    });
+    expect(expiredPreview.statusCode).toBe(410);
+    expect(expiredPreview.json()).toEqual({ error: 'TRANSFER_GONE' });
+  });
+
+  it('fails closed when capability lookup is ambiguous', async () => {
+    database = new MetadataDatabase();
+    app = buildApiServer(database);
+
+    // Force two rows with same capability_hash directly in DB
+    const capHash = createHash('sha256').update(Buffer.from(authToken, 'hex')).digest('hex');
+    database.db.prepare(`
+      INSERT INTO transfers (file_id, capability_hash, upload_session_hash, total_size_bytes, chunk_count, chunk_size_bytes, status, max_downloads, expires_at)
+      VALUES ('file-1', ?, 'sess-1', 10, 1, 10, 'READY', 1, '2099-01-01T00:00:00.000Z')
+    `).run(capHash);
+    database.db.prepare(`
+      INSERT INTO transfers (file_id, capability_hash, upload_session_hash, total_size_bytes, chunk_count, chunk_size_bytes, status, max_downloads, expires_at)
+      VALUES ('file-2', ?, 'sess-2', 10, 1, 10, 'READY', 1, '2099-01-01T00:00:00.000Z')
+    `).run(capHash);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/transfers/resolve',
+      headers: { authorization: `Bearer ${authToken}` },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(res.json()).toEqual({ error: 'TRANSFER_NOT_FOUND' });
+
+    const events = database.listClusterEvents({ eventType: 'CAPABILITY_LOOKUP_AMBIGUOUS' });
+    expect(events).toHaveLength(1);
+    expect(events[0].severity).toBe('ERROR');
+  });
 });
+
