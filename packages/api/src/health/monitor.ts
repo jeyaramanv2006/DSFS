@@ -19,6 +19,10 @@ interface HealthThresholds {
   unavailableAfterMs: number;
 }
 
+export interface HealthMonitorHooks {
+  onNodeRecovered?: (nodeId: string) => void;
+}
+
 export class HealthMonitor {
   private timer: NodeJS.Timeout | null = null;
   private isTicking = false;
@@ -28,6 +32,7 @@ export class HealthMonitor {
     private readonly database: MetadataDatabase,
     private readonly clock: () => Date = () => new Date(),
     private readonly thresholds: HealthThresholds = { unhealthyAfterMs: 15_000, unavailableAfterMs: 60_000 },
+    private readonly hooks: HealthMonitorHooks = {},
   ) {}
 
   public start(intervalMs = 2000): void {
@@ -99,6 +104,7 @@ export class HealthMonitor {
         details: { previous: previousStatus, current: 'HEALTHY' },
         createdAt: nowIso,
       });
+      this.hooks.onNodeRecovered?.(input.nodeId);
     }
   }
 
@@ -129,6 +135,10 @@ export class HealthMonitor {
           details: { previous: node.status, current, ageMs: age },
           createdAt: nowIso,
         });
+
+        if (eventType === 'NODE_RECOVERED') {
+          this.hooks.onNodeRecovered?.(node.node_id);
+        }
       }
     }
     return transitions;
