@@ -36,6 +36,7 @@ export interface TransferRow {
   download_lease_until: string | null;
   download_count: number;
   max_downloads: number;
+  created_at: string;
   original_name_encrypted: string | null;
 }
 
@@ -82,6 +83,70 @@ export interface ClusterEventRow {
   file_id: string | null;
   details: string | null;
   created_at: string;
+}
+
+export interface ClusterOverview {
+  totalNodes: number;
+  healthyNodes: number;
+  unhealthyNodes: number;
+  unavailableNodes: number;
+  totalCapacityBytes: number;
+  usedCapacityBytes: number;
+  storedChunkCount: number;
+  activeReplicaCount: number;
+  underReplicatedChunkCount: number;
+}
+
+export interface ClusterNodeInfo {
+  nodeId: string;
+  status: string;
+  lastHeartbeat: string;
+  lastHeartbeatAgeMs: number;
+  totalCapacityBytes: number;
+  usedCapacityBytes: number;
+  activeOperations: number;
+  storedChunkCount: number;
+  replicaCount: number;
+}
+
+export interface ClusterTransferSummary {
+  fileId: string;
+  status: string;
+  chunkCount: number;
+  chunkSizeBytes: number;
+  totalSizeBytes: number;
+  downloadCount: number;
+  maxDownloads: number;
+  createdAt: string;
+  expiresAt: string;
+  isDegraded: boolean;
+}
+
+export interface ClusterChunkReplicaInfo {
+  nodeId: string;
+  status: string;
+  nodeStatus: string;
+}
+
+export interface ClusterChunkDetail {
+  chunkId: string;
+  chunkIndex: number;
+  sizeBytes: number;
+  checksumSha256: string;
+  status: string;
+  expectedReplicaCount: number;
+  activeReplicaCount: number;
+  replicas: ClusterChunkReplicaInfo[];
+}
+
+export interface ClusterTransferDetail {
+  fileId: string;
+  status: string;
+  totalSizeBytes: number;
+  chunkCount: number;
+  createdAt: string;
+  expiresAt: string;
+  chunks: ClusterChunkDetail[];
 }
 
 const DEFAULT_SCHEMA_PATH = fileURLToPath(new URL('./schema.sql', import.meta.url));
@@ -551,14 +616,238 @@ export class MetadataDatabase {
     };
   }
 
+  public getClusterOverview(): ClusterOverview {
+    const nodeStats = this.db.prepare(`
+      SELECT
+        COUNT(*) AS total_nodes,
+        COUNT(CASE WHEN status = 'HEALTHY' THEN 1 END) AS healthy_nodes,
+        COUNT(CASE WHEN status = 'UNHEALTHY' THEN 1 END) AS unhealthy_nodes,
+        COUNT(CASE WHEN status = 'UNAVAILABLE' THEN 1 END) AS unavailable_nodes,
+        COALESCE(SUM(total_capacity_bytes), 0) AS total_capacity_bytes,
+        COALESCE(SUM(used_capacity_bytes), 0) AS used_capacity_bytes
+      FROM storage_nodes
+    `).get() as {
+      total_nodes: number;
+      healthy_nodes: number;
+      unhealthy_nodes: number;
+      unavailable_nodes: number;
+      total_capacity_bytes: number;
+      used_capacity_bytes: number;
+    };
+
+    const storedChunkCount = (this.db.prepare(
+      "SELECT COUNT(*) FROM chunks WHERE status = 'STORED'"
+    ).pluck().get() as number) ?? 0;
+
+    const activeReplicaCount = (this.db.prepare(
+      "SELECT COUNT(*) FROM chunk_replicas WHERE status = 'ACTIVE'"
+    ).pluck().get() as number) ?? 0;
+
+    const underReplicatedChunkCount = this.getRecoveryCandidates(2).length;
+
+    return {
+      totalNodes: Number(nodeStats.total_nodes),
+      healthyNodes: Number(nodeStats.healthy_nodes),
+      unhealthyNodes: Number(nodeStats.unhealthy_nodes),
+      unavailableNodes: Number(nodeStats.unavailable_nodes),
+      totalCapacityBytes: Number(nodeStats.total_capacity_bytes),
+      usedCapacityBytes: Number(nodeStats.used_capacity_bytes),
+      storedChunkCount,
+      activeReplicaCount,
+      underReplicatedChunkCount,
+    };
+  }
+
+  public getClusterNodes(now = new Date()): ClusterNodeInfo[] {
+    const rows = this.db.prepare(`
+      SELECT
+        s.node_id,
+        s.status,
+        s.last_heartbeat,
+        s.total_capacity_bytes,
+        s.used_capacity_bytes,
+        s.active_operations,
+        COUNT(DISTINCT CASE WHEN r.status = 'ACTIVE' THEN r.chunk_id END) AS stored_chunk_count,
+        COUNT(CASE WHEN r.status = 'ACTIVE' THEN 1 END) AS replica_count
+      FROM storage_nodes s
+      LEFT JOIN chunk_replicas r ON r.node_id = s.node_id
+      GROUP BY s.node_id
+      ORDER BY s.node_id
+    `).all() as Array<{
+      node_id: string;
+      status: string;
+      last_heartbeat: string;
+      total_capacity_bytes: number;
+      used_capacity_bytes: number;
+      active_operations: number;
+      stored_chunk_count: number;
+      replica_count: number;
+    }>;
+
+    const nowMs = now.getTime();
+    return rows.map((r) => {
+      const hbTime = new Date(r.last_heartbeat).getTime();
+      const ageMs = Number.isFinite(hbTime) ? Math.max(0, nowMs - hbTime) : 999_999_999;
+      return {
+        nodeId: r.node_id,
+        status: r.status,
+        lastHeartbeat: r.last_heartbeat,
+        lastHeartbeatAgeMs: ageMs,
+        totalCapacityBytes: Number(r.total_capacity_bytes),
+        usedCapacityBytes: Number(r.used_capacity_bytes),
+        activeOperations: Number(r.active_operations),
+        storedChunkCount: Number(r.stored_chunk_count),
+        replicaCount: Number(r.replica_count),
+      };
+    });
+  }
+
+  public listClusterTransfers(limit = 20): ClusterTransferSummary[] {
+    const cappedLimit = Math.min(Math.max(1, limit), 100);
+    const rows = this.db.prepare(`
+      SELECT
+        file_id,
+        status,
+        chunk_count,
+        chunk_size_bytes,
+        total_size_bytes,
+        download_count,
+        max_downloads,
+        created_at,
+        expires_at
+      FROM transfers
+      ORDER BY created_at DESC
+      LIMIT ?
+    `).all(cappedLimit) as Array<{
+      file_id: string;
+      status: string;
+      chunk_count: number;
+      chunk_size_bytes: number;
+      total_size_bytes: number;
+      download_count: number;
+      max_downloads: number;
+      created_at: string;
+      expires_at: string;
+    }>;
+
+    if (rows.length === 0) return [];
+
+    const fileIds = rows.map((r) => r.file_id);
+    const placeholders = fileIds.map(() => '?').join(',');
+
+    const degradedRows = this.db.prepare(`
+      SELECT DISTINCT c.file_id
+      FROM chunks c
+      LEFT JOIN chunk_replicas r ON r.chunk_id = c.chunk_id AND r.status = 'ACTIVE'
+      LEFT JOIN storage_nodes s ON s.node_id = r.node_id AND s.status = 'HEALTHY'
+      WHERE c.file_id IN (${placeholders}) AND c.status = 'STORED'
+      GROUP BY c.chunk_id
+      HAVING COUNT(s.node_id) < 2
+    `).pluck().all(...fileIds) as string[];
+
+    const degradedSet = new Set(degradedRows);
+
+    return rows.map((r) => ({
+      fileId: r.file_id,
+      status: r.status,
+      chunkCount: r.chunk_count,
+      chunkSizeBytes: r.chunk_size_bytes,
+      totalSizeBytes: r.total_size_bytes,
+      downloadCount: r.download_count,
+      maxDownloads: r.max_downloads,
+      createdAt: r.created_at,
+      expiresAt: r.expires_at,
+      isDegraded: degradedSet.has(r.file_id),
+    }));
+  }
+
+  public getTransferChunks(fileId: string): ClusterTransferDetail | undefined {
+    const transfer = this.getTransfer(fileId);
+    if (!transfer) return undefined;
+
+    const chunkRows = this.db.prepare(`
+      SELECT chunk_id, chunk_index, size_bytes, checksum_sha256, status
+      FROM chunks
+      WHERE file_id = ?
+      ORDER BY chunk_index ASC
+    `).all(fileId) as Array<{
+      chunk_id: string;
+      chunk_index: number;
+      size_bytes: number;
+      checksum_sha256: string;
+      status: string;
+    }>;
+
+    const replicaRows = this.db.prepare(`
+      SELECT r.chunk_id, r.node_id, r.status AS replica_status, COALESCE(s.status, 'UNKNOWN') AS node_status
+      FROM chunk_replicas r
+      JOIN chunks c ON c.chunk_id = r.chunk_id
+      LEFT JOIN storage_nodes s ON s.node_id = r.node_id
+      WHERE c.file_id = ?
+      ORDER BY r.chunk_id, r.node_id
+    `).all(fileId) as Array<{
+      chunk_id: string;
+      node_id: string;
+      replica_status: string;
+      node_status: string;
+    }>;
+
+    const replicasByChunk = new Map<string, ClusterChunkReplicaInfo[]>();
+    for (const row of replicaRows) {
+      const list = replicasByChunk.get(row.chunk_id) ?? [];
+      list.push({
+        nodeId: row.node_id,
+        status: row.replica_status,
+        nodeStatus: row.node_status,
+      });
+      replicasByChunk.set(row.chunk_id, list);
+    }
+
+    const chunks: ClusterChunkDetail[] = chunkRows.map((chunk) => {
+      const replicas = replicasByChunk.get(chunk.chunk_id) ?? [];
+      const activeReplicaCount = replicas.filter(
+        (r) => r.status === 'ACTIVE' && r.nodeStatus === 'HEALTHY',
+      ).length;
+      return {
+        chunkId: chunk.chunk_id,
+        chunkIndex: chunk.chunk_index,
+        sizeBytes: chunk.size_bytes,
+        checksumSha256: chunk.checksum_sha256,
+        status: chunk.status,
+        expectedReplicaCount: 2,
+        activeReplicaCount,
+        replicas,
+      };
+    });
+
+    return {
+      fileId: transfer.file_id,
+      status: transfer.status,
+      totalSizeBytes: transfer.total_size_bytes,
+      chunkCount: transfer.chunk_count,
+      createdAt: transfer.created_at,
+      expiresAt: transfer.expires_at,
+      chunks,
+    };
+  }
+
   public listClusterEvents(options?: {
     limit?: number;
     nodeId?: string;
     eventType?: string;
+    afterId?: string;
   }): ClusterEventRow[] {
-    const limit = options?.limit ?? 100;
+    const limit = Math.min(Math.max(1, options?.limit ?? 50), 100);
     const conditions: string[] = [];
     const params: unknown[] = [];
+
+    if (options?.afterId) {
+      const targetRow = this.db.prepare('SELECT rowid FROM cluster_events WHERE id = ?').get(options.afterId) as { rowid: number } | undefined;
+      if (targetRow) {
+        conditions.push('rowid > ?');
+        params.push(targetRow.rowid);
+      }
+    }
 
     if (options?.nodeId) {
       conditions.push('node_id = ?');
@@ -573,7 +862,8 @@ export class MetadataDatabase {
     params.push(limit);
 
     return this.db.prepare(`
-      SELECT * FROM cluster_events
+      SELECT id, event_type, severity, node_id, file_id, details, created_at
+      FROM cluster_events
       ${where}
       ORDER BY created_at DESC, rowid DESC
       LIMIT ?

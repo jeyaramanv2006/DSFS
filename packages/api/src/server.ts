@@ -7,6 +7,7 @@ import type { ChunkReplicator } from './replication/replication.js';
 import type { ReplicaReadService } from './replication/read-service.js';
 import { HealthMonitor } from './health/monitor.js';
 import { registerHealthRoutes } from './health/routes.js';
+import { registerClusterRoutes } from './routes/cluster.js';
 import { createLoggerOptions } from './hardening/logging.js';
 import { RouteRateLimiter } from './hardening/rate-limit.js';
 
@@ -39,5 +40,6 @@ export function buildApiServer(
     clusterSecret: options.clusterSecret,
     allowedNodeIds: options.allowedNodeIds,
   });
+  registerClusterRoutes(app, database, healthMonitor);
   return app;
 }

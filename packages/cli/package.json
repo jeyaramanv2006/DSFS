@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run src"
   },
   "dependencies": {
     "@voidshare/shared": "0.1.0"
