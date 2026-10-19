@@ -16,9 +16,10 @@ import {
   type TransferPreview,
 } from './transfer.js';
 import { GradientBars } from '@/components/ui/GradientBars';
+import { ClusterDashboard } from './components/ClusterDashboard';
 import './styles.css';
 
-type AppMode = 'home' | 'send' | 'download';
+type AppMode = 'home' | 'send' | 'download' | 'cluster';
 type SendStep = 'select' | 'configure' | 'review' | 'uploading' | 'result';
 type DownloadStep = 'input' | 'ready' | 'busy' | 'done' | 'error';
 
@@ -82,35 +83,66 @@ function parseLinkInput(input: string): { fileId: string; secret: string } | nul
   return null;
 }
 
-function fileIdFromPath(): string | null {
-  const match = window.location.pathname.match(/^\/download\/([a-f0-9]{32})$/i);
-  return match?.[1] ?? null;
+function parseRouteFromUrl(): { mode: AppMode; fileId: string | null } {
+  if (typeof window === 'undefined') return { mode: 'home', fileId: null };
+  const path = window.location.pathname;
+  if (path === '/cluster' || path === '/admin/cluster') {
+    return { mode: 'cluster', fileId: null };
+  }
+  const match = path.match(/^\/download\/([a-f0-9]{32})$/i);
+  if (match?.[1]) {
+    return { mode: 'download', fileId: match[1] };
+  }
+  return { mode: 'home', fileId: null };
 }
 
 function App() {
-  const pathFileId = fileIdFromPath();
-  const [mode, setMode] = useState<AppMode>(pathFileId ? 'download' : 'home');
+  const initial = parseRouteFromUrl();
+  const [mode, setMode] = useState<AppMode>(initial.mode);
+  const [pathFileId, setPathFileId] = useState<string | null>(initial.fileId);
+
+  useEffect(() => {
+    const onPopState = () => {
+      const parsed = parseRouteFromUrl();
+      setMode(parsed.mode);
+      setPathFileId(parsed.fileId);
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  const navigateTo = (newMode: AppMode, url = '/') => {
+    if (window.location.pathname !== url) {
+      window.history.pushState({}, '', url);
+    }
+    setMode(newMode);
+    if (newMode === 'download') {
+      const parsed = parseRouteFromUrl();
+      setPathFileId(parsed.fileId);
+    }
+  };
 
   return (
-    <Shell onGoHome={() => setMode('home')}>
+    <Shell
+      currentMode={mode}
+      onGoHome={() => navigateTo('home', '/')}
+      onGoCluster={() => navigateTo('cluster', '/cluster')}
+    >
       {mode === 'home' && (
         <HomeLanding
           onSelectSend={() => setMode('send')}
           onSelectDownload={() => setMode('download')}
+          onSelectCluster={() => navigateTo('cluster', '/cluster')}
         />
       )}
-      {mode === 'send' && <SendFlow onBackToHome={() => setMode('home')} />}
+      {mode === 'send' && <SendFlow onBackToHome={() => navigateTo('home', '/')} />}
       {mode === 'download' && (
         <DownloadFlow
           initialFileId={pathFileId}
-          onBackToHome={() => {
-            if (window.location.pathname !== '/') {
-              window.history.pushState({}, '', '/');
-            }
-            setMode('home');
-          }}
+          onBackToHome={() => navigateTo('home', '/')}
         />
       )}
+      {mode === 'cluster' && <ClusterDashboard />}
     </Shell>
   );
 }
@@ -145,7 +177,17 @@ function BrandLogo() {
   );
 }
 
-function Shell({ children, onGoHome }: { children: React.ReactNode; onGoHome: () => void }) {
+function Shell({
+  children,
+  currentMode,
+  onGoHome,
+  onGoCluster,
+}: {
+  children: React.ReactNode;
+  currentMode: AppMode;
+  onGoHome: () => void;
+  onGoCluster: () => void;
+}) {
   return (
     <>
       {/* Background Animated Gradient Bars (React Bits Pro - Midnight Precision) */}
@@ -185,6 +227,23 @@ function Shell({ children, onGoHome }: { children: React.ReactNode; onGoHome: ()
               void<span className="brand-title-muted">share</span>
             </span>
           </a>
+
+          <nav className="topbar-nav" aria-label="Main navigation">
+            <button
+              type="button"
+              className={`nav-link-btn ${currentMode !== 'cluster' ? 'active' : ''}`}
+              onClick={onGoHome}
+            >
+              Transfers
+            </button>
+            <button
+              type="button"
+              className={`nav-link-btn ${currentMode === 'cluster' ? 'active' : ''}`}
+              onClick={onGoCluster}
+            >
+              <span className="nav-pulse-dot" /> Cluster Ops
+            </button>
+          </nav>
         </header>
 
         {children}
@@ -204,9 +263,11 @@ function Shell({ children, onGoHome }: { children: React.ReactNode; onGoHome: ()
 function HomeLanding({
   onSelectSend,
   onSelectDownload,
+  onSelectCluster,
 }: {
   onSelectSend: () => void;
   onSelectDownload: () => void;
+  onSelectCluster: () => void;
 }) {
   return (
     <section className="wizard-container">
@@ -294,6 +355,26 @@ function HomeLanding({
           <strong>URL Fragment Key</strong>
           <span>The master key lives in #secret and is never transmitted to the coordinator.</span>
         </div>
+      </div>
+
+      <div
+        className="cluster-banner-card"
+        role="button"
+        tabIndex={0}
+        onClick={onSelectCluster}
+        onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onSelectCluster()}
+      >
+        <div className="cluster-banner-icon">📊</div>
+        <div className="cluster-banner-text">
+          <div className="cluster-banner-title">
+            <span>Cluster Operations &amp; Node Telemetry</span>
+            <span className="cluster-banner-badge">3-PC LAN</span>
+          </div>
+          <p className="cluster-banner-desc">
+            Monitor real-time replication topology, node heartbeats, in-flight operations, and storage capacity across PC B &amp; PC C.
+          </p>
+        </div>
+        <span className="cluster-banner-arrow">→</span>
       </div>
     </section>
   );
