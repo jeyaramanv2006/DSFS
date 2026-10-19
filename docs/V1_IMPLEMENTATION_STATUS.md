@@ -60,6 +60,9 @@
 | **Phase 8** | `cac67d6` | `docs: add three-PC local demo startup runbook` | Network topology, port allocation, Windows Defender firewall commands, environment config, startup commands, and troubleshooting matrix | `docs/LOCAL_DEMO.md` sections 1–6 created | Architecture & walkthrough |
 | **Phase 8** | `8f00cf2` | `docs: add V1 architecture and presentation walkthrough` | Distributed data flow, zero-knowledge encryption, heartbeat thresholds, replica failover, 5-minute scripted presentation walkthrough with speaker notes, explicit 2-node limitations | `docs/LOCAL_DEMO.md` sections 7–9 added | Final verification evidence |
 | **Phase 8** | `d278a2d` | `docs: record final V1 limitations and verification evidence` | Final V1 Exit Gate checklist verification, all phase commits confirmed, limitations documented | Complete V1 implementation signed off | Master Plan V1 Complete |
+| **Phase 8** | `d1fcf40` | `chore(docs): add screenshot capture automation and capture UI images` | Playwright screenshot automation script (`scripts/capture-screenshots.ts`), high-resolution PNGs for cluster console, upload wizard, and code retrieval (`docs/assets/*.png`) | Real live UI screenshots generated | Landing README |
+| **Phase 8** | `8c49880` | `docs: add comprehensive GitHub landing README with architecture and visuals` | Production-grade `README.md` at repository root with visual showcase, architecture diagram, monorepo breakdown, LAN deploy guide, and MIT `LICENSE` | GitHub repository landing verified | Update status tracker |
+| **Phase 8** | `6e7308c` | `docs: record README and screenshot assets in implementation status tracker` | Status tracker updated with landing README and screenshot asset additions | Documentation complete | Push to remote |
 
 ---
 
@@ -128,6 +131,8 @@
 - [x] `docs/LOCAL_DEMO.md` with 3-PC setup instructions, firewall rules, and startup commands (`cac67d6`).
 - [x] Presentation walkthrough (4–5 minute live sequence with speaker notes) (`8f00cf2`).
 - [x] Known limitations documented (including 2-node re-replication and trusted LAN assumptions) (`8f00cf2`).
+- [x] Automated UI screenshot capture pipeline generating high-resolution PNGs in `docs/assets/` (`d1fcf40`).
+- [x] Comprehensive, visual `README.md` at repository root for GitHub landing with MIT `LICENSE` (`8c49880`).
 
 ---
 
