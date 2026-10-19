@@ -13,6 +13,8 @@ import { RouteRateLimiter } from './hardening/rate-limit.js';
 export interface ApiServerOptions {
   logger?: boolean;
   rateLimiter?: RouteRateLimiter;
+  clusterSecret?: string;
+  allowedNodeIds?: string[];
 }
 
 export function buildApiServer(

@@ -17,7 +17,11 @@ async function sendNotFound(reply: FastifyReply): Promise<void> {
   await reply.code(404).send({ error: 'CHUNK_NOT_FOUND' });
 }
 
-export function buildServer(store: IStorageNode): FastifyInstance {
+export interface StorageServerOptions {
+  clusterSecret?: string;
+}
+
+export function buildServer(store: IStorageNode, options: StorageServerOptions = {}): FastifyInstance {
   const app = Fastify({
     bodyLimit: 220 * 1024 * 1024,
     exposeHeadRoutes: false,
@@ -103,7 +107,9 @@ export function buildServer(store: IStorageNode): FastifyInstance {
 
 const nodeId = process.env.NODE_ID ?? 'node-1';
 const port = Number(process.env.PORT ?? 9001);
+const host = process.env.HOST ?? '0.0.0.0';
 const dataDir = process.env.DATA_DIR ?? `./data/${nodeId}`;
+const clusterSecret = process.env.STORAGE_CLUSTER_SECRET;
 
 if (process.argv[1]?.endsWith('server.ts') || process.argv[1]?.endsWith('server.js')) {
   const app = buildServer(
@@ -112,8 +118,9 @@ if (process.argv[1]?.endsWith('server.ts') || process.argv[1]?.endsWith('server.
       nodeId,
       Number(process.env.TOTAL_CAPACITY_BYTES ?? 0),
     ),
+    { clusterSecret },
   );
-  app.listen({ host: '0.0.0.0', port }).catch((error) => {
+  app.listen({ host, port }).catch((error) => {
     app.log.error(error);
     process.exitCode = 1;
   });

@@ -14,6 +14,7 @@ export default defineConfig({
     },
   },
   server: {
+    host: process.env.HOST ?? '0.0.0.0',
     port: 5173,
     proxy: { '/api': process.env.VOIDSHARE_API_TARGET ?? 'http://localhost:8080' },
   },

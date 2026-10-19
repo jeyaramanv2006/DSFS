@@ -27,7 +27,10 @@ export interface StorageMaintenanceClient {
 }
 
 export class HttpStorageNodeClient implements StorageNodeClient, StorageMaintenanceClient {
-  public constructor(private readonly endpoint: string) {}
+  public constructor(
+    private readonly endpoint: string,
+    private readonly clusterSecret?: string,
+  ) {}
 
   public putChunk(
     chunkId: string,
@@ -37,12 +40,17 @@ export class HttpStorageNodeClient implements StorageNodeClient, StorageMaintena
     const target = new URL(`/chunks/${encodeURIComponent(chunkId)}`, this.endpoint);
     const request = target.protocol === 'https:' ? httpsRequest : httpRequest;
     return new Promise((resolve, reject) => {
+      const headers: Record<string, string> = {
+        'content-type': 'application/octet-stream',
+        'x-checksum': checksumSha256,
+      };
+      if (this.clusterSecret) {
+        headers.authorization = `Bearer ${this.clusterSecret}`;
+      }
+
       const outgoing = request(target, {
         method: 'PUT',
-        headers: {
-          'content-type': 'application/octet-stream',
-          'x-checksum': checksumSha256,
-        },
+        headers,
       }, (response) => {
         let body = '';
         response.setEncoding('utf8');
@@ -74,7 +82,12 @@ export class HttpStorageNodeClient implements StorageNodeClient, StorageMaintena
     const target = new URL(`/chunks/${encodeURIComponent(chunkId)}`, this.endpoint);
     const request = target.protocol === 'https:' ? httpsRequest : httpRequest;
     return new Promise((resolve, reject) => {
-      const outgoing = request(target, { method: 'GET' }, (response) => {
+      const headers: Record<string, string> = {};
+      if (this.clusterSecret) {
+        headers.authorization = `Bearer ${this.clusterSecret}`;
+      }
+
+      const outgoing = request(target, { method: 'GET', headers }, (response) => {
         if ((response.statusCode ?? 500) >= 400) {
           response.resume();
           reject(new Error(`storage node returned ${response.statusCode}`));
@@ -106,7 +119,12 @@ export class HttpStorageNodeClient implements StorageNodeClient, StorageMaintena
     const target = new URL(path, this.endpoint);
     const request = target.protocol === 'https:' ? httpsRequest : httpRequest;
     return new Promise((resolve, reject) => {
-      const outgoing = request(target, { method }, (response) => {
+      const headers: Record<string, string> = {};
+      if (this.clusterSecret) {
+        headers.authorization = `Bearer ${this.clusterSecret}`;
+      }
+
+      const outgoing = request(target, { method, headers }, (response) => {
         let body = '';
         response.setEncoding('utf8');
         response.on('data', (chunk: string) => { body += chunk; });
