@@ -14,8 +14,8 @@
 | **Phase 1** | Restore Build & Fix Critical Correctness | 🟢 Done | 4 | `npm test` 69 passed, `npm run build` PASS (all 5 workspaces) |
 | **Phase 2** | Three-PC LAN Configuration & Service Auth | 🟢 Done | 4 | `npm test` 72 passed, `npm run build` PASS, 3-PC setup guide added |
 | **Phase 3** | Heartbeats & Continuous Health Monitoring | 🟢 Done | 4 | `npm test` 81 passed, `npm run build` PASS across all workspaces |
-| **Phase 4** | Replica Reads, Workers & Durability | 🔴 Not Started | 0 | Ready to proceed after approval |
-| **Phase 5** | Retrieval Codes (with Share Links) | 🔴 Not Started | 0 | Pending Phase 4 |
+| **Phase 4** | Replica Reads, Workers & Durability | 🟢 Done | 4 | `npm test` 87 passed, `npm run build` PASS, 2-node outage & recovery integration tests verified |
+| **Phase 5** | Retrieval Codes (with Share Links) | 🔴 Not Started | 0 | Ready to proceed after approval |
 | **Phase 6** | Real Cluster Dashboard | 🔴 Not Started | 0 | Pending Phase 5 |
 | **Phase 7** | End-to-End Verification & Hardening | 🔴 Not Started | 0 | Pending Phase 6 |
 | **Phase 8** | Documentation & Presentation Runbook | 🔴 Not Started | 0 | Pending Phase 7 |
@@ -41,6 +41,10 @@
 | **Phase 3** | `1949537` | `feat(api): run autonomous node health monitoring with configurable thresholds` | Added `start()`/`stop()` timer lifecycle, default epoch heartbeat for UNAVAILABLE nodes | `monitor.test.ts`: 4/4 PASS; `npm test`: 77/77 PASS | Cluster events persistence |
 | **Phase 3** | `2f95f7c` | `feat(api): record cluster health transition events on node state changes` | Added `cluster_events` table and persisted transitions (`NODE_UNHEALTHY`, `NODE_UNAVAILABLE`, `NODE_RECOVERED`, `HEARTBEAT_REJECTED`) | `database.test.ts`: 8/8 PASS; `routes.test.ts`: 4/4 PASS; `npm test`: 79/79 PASS | Graceful shutdown hooks |
 | **Phase 3** | `6ef1a79` | `fix(api): stop health monitor and heartbeat timers cleanly on shutdown` | Added SIGINT/SIGTERM handlers and Fastify `onClose` hooks stopping background loops | `server.test.ts`: 5/5 PASS; `monitor.test.ts`: 6/6 PASS; full `npm test`: 81/81 PASS | Update tracker, prompt user |
+| **Phase 4** | `f40ea96` | `fix(api): read chunks from recorded healthy replicas with failover` | Implemented `ReplicaReadService` querying `storage_nodes` & `chunk_replicas` | `read-service.test.ts`: 3/3 PASS; `npm test`: 83/83 PASS | Replication durability |
+| **Phase 4** | `71d2145` | `fix(api): report replication only after both required acks and checksum validation` | Enforced strict `RF=2` replica acks before marking chunks `STORED` | `transfers.test.ts`: 12/12 PASS; negative/partial tests PASS | Background workers |
+| **Phase 4** | `8a342a2` | `feat(api): schedule expiry-cleanup, reconciler, and recovery workers at startup` | Created `WorkerManager` to orchestrate cleanup, reconciliation, and recovery | `workers/manager.test.ts`: 3/3 PASS; full `npm test`: 86/86 PASS | Two-node outage integration test |
+| **Phase 4** | `af34fec` | `test(api): verify two-node outage, failover, and restoration behavior` | Comprehensive outage test suite verifying 2-node limits, failover, data intactness | `recovery/two-node-outage.test.ts`: PASS; full `npm test`: 87/87 PASS | Phase 4 complete |
 
 ---
 
@@ -79,11 +83,11 @@
 - [x] Automated tests for missed heartbeats, recovery, and transitions (81 tests pass).
 
 ### Phase 4: Replica Reads, Workers & Durability
-- [ ] Read failover to recorded healthy replicas (`ReplicaReadService` + routes).
-- [ ] Upload durability requiring confirmed replicas before marking transfer ready.
-- [ ] Wire background workers into API startup (`ExpirationSweeper`, `StorageReconciler`, `RecoveryService`).
-- [ ] Multi-replica deletion on transfer expiration/consumption.
-- [ ] Two-node outage and recovery tests asserting RF=2 limitation.
+- [x] Read failover to recorded healthy replicas (`ReplicaReadService` + routes) (`f40ea96`).
+- [x] Upload durability requiring confirmed replicas before marking transfer ready (`71d2145`).
+- [x] Wire background workers into API startup (`ExpirationSweeper`, `StorageReconciler`, `RecoveryService`) (`8a342a2`).
+- [x] Multi-replica deletion on transfer expiration/consumption (`71d2145`, `8a342a2`).
+- [x] Two-node outage and recovery tests asserting RF=2 limitation (`af34fec`).
 
 ### Phase 5: Retrieval Codes
 - [ ] Unpadded URL-safe Base64 encoding/decoding for 32-byte secret (43 chars).
