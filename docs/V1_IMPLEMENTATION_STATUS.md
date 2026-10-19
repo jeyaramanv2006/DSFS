@@ -17,7 +17,7 @@
 | **Phase 4** | Replica Reads, Workers & Durability | 🟢 Done | 4 | `npm test` 87 passed, `npm run build` PASS, 2-node outage & recovery integration tests verified |
 | **Phase 5** | Retrieval Codes (with Share Links) | 🟢 Done | 4 | `npm test` 97 passed, `npm run build` PASS, retrieval codes, capability resolution, dual entry verified |
 | **Phase 6** | Real Cluster Dashboard | 🟢 Done | 4 | `npm test` 102 passed, `npm run build` PASS across all workspaces, live topology & event timeline verified |
-| **Phase 7** | End-to-End Verification & Hardening | 🟡 In Progress | 2 | `npm test` 108 passed across 21 test suites; `npm run build` PASS across all 5 workspaces |
+| **Phase 7** | End-to-End Verification & Hardening | 🟢 Done | 4 | `npm test` 108 passed across 21 test suites; `npm run build` PASS across all 5 workspaces |
 | **Phase 8** | Documentation & Presentation Runbook | 🔴 Not Started | 0 | Pending Phase 7 |
 
 ---
@@ -55,7 +55,8 @@
 | **Phase 6** | `545d080` | `fix(web): handle stale monitoring data and node outages` | Stale indicator, disconnect sticky banner, node outage failover callout, demo guide panel | `npm run build`: PASS; `npm test`: 102/102 PASS | Phase 6 complete |
 | **Phase 7** | `b3fc69f` | `test(api): cover heartbeat lifecycle and replica failover` | Auth rejection, invalid heartbeat payloads, state transitions (HEALTHY -> UNHEALTHY -> UNAVAILABLE), replica failover on node outage, 503 on exhaustion, worker lifecycle | `lifecycle-failover.test.ts`: 5/5 PASS; full `npm test`: 107/107 PASS | Two-PC topology E2E test |
 | **Phase 7** | `a3fa519` | `test(e2e): verify upload retrieval and two-PC storage behavior` | Multi-chunk upload across real HTTP servers (PC A Coordinator + PC B Node 1 + PC C Node 2), RF=2 replication, retrieve by code, kill PC B during active retrieval -> replica failover to PC C, quota exhaustion (410 Gone), sweeper orphaned pending delete during partial outage, sweeper finalization on node recovery | `two-pc-e2e.test.ts`: PASS; full `npm test`: 108/108 PASS; `npm run build`: PASS | Record verified build & test results |
-| **Phase 7** | `pending` | `test: record verified V1 build and test results` | Full test execution across all workspaces (108 tests) and production build (`npm run build --workspaces`) | `npm test`: 108/108 PASS across 21 test suites; `npm run build`: PASS across all 5 packages | Three-PC acceptance checklist |
+| **Phase 7** | `4200db5` | `test: record verified V1 build and test results` | Full test execution across all workspaces (108 tests) and production build (`npm run build --workspaces`) | `npm test`: 108/108 PASS across 21 test suites; `npm run build`: PASS across all 5 packages | Three-PC acceptance checklist |
+| **Phase 7** | `pending` | `docs: document three-PC acceptance test checklist and validation criteria` | Detailed manual 3-PC acceptance test checklist, automated test cross-reference, and physical verification matrix (`docs/THREE_PC_ACCEPTANCE_CHECKLIST.md`) | 3-PC acceptance checklist documented | Phase 7 complete; prompt user before Phase 8 |
 
 ---
 
@@ -117,8 +118,8 @@
 ### Phase 7: End-to-End Verification & Hardening
 - [x] Heartbeat lifecycle, auth enforcement, and replica failover integration tests (`b3fc69f`).
 - [x] Multi-chunk upload, dual replication, code retrieval, node outage failover, and sweeper e2e test (`a3fa519`).
-- [x] Verified full monorepo build and test suites (108 tests passing across 21 test suites, `npm run build --workspaces` PASS across all 5 packages).
-- [ ] Manual three-PC acceptance test checklist.
+- [x] Verified full monorepo build and test suites (108 tests passing across 21 test suites, `npm run build --workspaces` PASS across all 5 packages) (`4200db5`).
+- [x] Manual three-PC acceptance test checklist (`docs/THREE_PC_ACCEPTANCE_CHECKLIST.md`).
 
 ### Phase 8: Documentation & Presentation Runbook
 - [ ] `docs/LOCAL_DEMO.md` with 3-PC setup instructions, firewall rules, and startup commands.
