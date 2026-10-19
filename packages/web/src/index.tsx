@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState, useEffect, type ChangeEvent, type DragEvent } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { decryptFilename } from '@voidshare/shared';
+import { decryptFilename, encodeRetrievalCode } from '@voidshare/shared';
 import { downloadFile, uploadFile, type DownloadProgress, type UploadProgress, type UploadResult } from './transfer.js';
 import { GradientBars } from '@/components/ui/GradientBars';
 import './styles.css';
@@ -719,16 +719,29 @@ function SendResultCard({
   onSendAnother: () => void;
   onBackToHome: () => void;
 }) {
-  const [copied, setCopied] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [copiedCode, setCopiedCode] = useState(false);
+
   const shareLink = useMemo(
     () => `${window.location.origin}/download/${result.fileId}#${result.secret}`,
     [result],
   );
 
-  const copy = async () => {
+  const retrievalCode = useMemo(
+    () => result.retrievalCode || encodeRetrievalCode(result.secret),
+    [result],
+  );
+
+  const copyLink = async () => {
     await navigator.clipboard.writeText(shareLink);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 2000);
+    setCopiedLink(true);
+    window.setTimeout(() => setCopiedLink(false), 2000);
+  };
+
+  const copyCode = async () => {
+    await navigator.clipboard.writeText(retrievalCode);
+    setCopiedCode(true);
+    window.setTimeout(() => setCopiedCode(false), 2000);
   };
 
   const handleNativeShare = async () => {
@@ -736,14 +749,14 @@ function SendResultCard({
       try {
         await navigator.share({
           title: `VoidShare: ${result.fileName}`,
-          text: `Download encrypted file: ${result.fileName}`,
+          text: `Download encrypted file: ${result.fileName}\nRetrieval Code: ${retrievalCode}`,
           url: shareLink,
         });
       } catch {
         // User dismissed share sheet
       }
     } else {
-      copy();
+      copyLink();
     }
   };
 
@@ -753,23 +766,48 @@ function SendResultCard({
         <span className="success-check">✓</span>
         <div>
           <p className="kicker">Transfer Active</p>
-          <h2 className="success-heading">Share link created</h2>
+          <h2 className="success-heading">Transfer Ready to Share</h2>
         </div>
       </div>
 
       <p className="success-desc">
-        Anyone with this link can retrieve and decrypt the file. The key is in the <code>#secret</code> fragment and was never sent to the coordinator.
+        Recipients can access and decrypt this file using either the <strong>Share Link</strong> or the <strong>Retrieval Code</strong> below. The encryption key is held locally and was never sent to the coordinator.
       </p>
 
-      {/* Link Display Box */}
-      <div className="share-link-box">
-        <div className="share-link-text">
-          <span className="link-base">{shareLink.replace(/#.*$/, '')}</span>
-          <span className="link-secret">#secret</span>
+      {/* Credentials Stack */}
+      <div className="credentials-group">
+        {/* Share Link */}
+        <div className="credential-card">
+          <div className="credential-header">
+            <span className="credential-label">🔗 Share Link</span>
+            <span className="credential-hint">Browser link with embedded #secret key</span>
+          </div>
+          <div className="share-link-box">
+            <div className="share-link-text">
+              <span className="link-base">{shareLink.replace(/#.*$/, '')}</span>
+              <span className="link-secret">#secret</span>
+            </div>
+            <button className={`btn-copy ${copiedLink ? 'copied' : ''}`} onClick={copyLink}>
+              {copiedLink ? 'Copied' : 'Copy Link'}
+            </button>
+          </div>
         </div>
-        <button className={`btn-copy ${copied ? 'copied' : ''}`} onClick={copy}>
-          {copied ? 'Copied' : 'Copy Link'}
-        </button>
+
+        {/* Retrieval Code */}
+        <div className="credential-card">
+          <div className="credential-header">
+            <span className="credential-label">🔑 Retrieval Code</span>
+            <span className="credential-hint">43-character capability for direct code entry</span>
+          </div>
+          <div className="share-link-box">
+            <div className="share-link-text retrieval-code-text">
+              <code>{retrievalCode}</code>
+            </div>
+            <button className={`btn-copy ${copiedCode ? 'copied' : ''}`} onClick={copyCode}>
+              {copiedCode ? 'Copied' : 'Copy Code'}
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* Metadata */}

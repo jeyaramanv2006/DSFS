@@ -2,6 +2,7 @@ import {
   createChunkAad,
   decryptChunk,
   deriveKeys,
+  encodeRetrievalCode,
   encryptChunk,
   encryptFilename,
   generateSecret,
@@ -30,6 +31,7 @@ export interface UploadOptions {
 export interface UploadResult {
   fileId: string;
   secret: string;
+  retrievalCode: string;
   expiresAt: string;
   fileName: string;
   fileSizeBytes: number;
@@ -120,6 +122,7 @@ export async function uploadFile(
   });
 
   const secret = generateSecret();
+  const retrievalCode = encodeRetrievalCode(secret);
   const { encKey, authToken } = await deriveKeys(secret);
   const chunkCount = Math.max(1, Math.ceil(file.size / CHUNK_SIZE_BYTES));
   const totalSizeBytes = file.size + chunkCount * CHUNK_OVERHEAD_BYTES;
@@ -226,6 +229,7 @@ export async function uploadFile(
   return {
     fileId: init.fileId,
     secret,
+    retrievalCode,
     expiresAt: init.expiresAt,
     fileName: file.name,
     fileSizeBytes: file.size,

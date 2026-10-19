@@ -1008,6 +1008,41 @@ input:focus-visible {
   margin: 0;
 }
 
+.credentials-group {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.credential-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.credential-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.credential-label {
+  font-size: 0.82rem;
+  font-weight: 510;
+  color: var(--text-primary);
+}
+
+.credential-hint {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.retrieval-code-text {
+  color: var(--accent-lime);
+  letter-spacing: 0.04em;
+  font-size: 0.85rem;
+}
+
 .share-link-box {
   background: var(--surface-elevated);
   border: 1px solid var(--border-hairline);
