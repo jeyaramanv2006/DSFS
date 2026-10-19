@@ -3,7 +3,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { MetadataDatabase } from '../db/database.js';
 import type { StorageNodeClient } from '../services/storage-client.js';
 import { hashToken, isTokenHex } from '../services/tokens.js';
-import type { ChunkReplicator } from '../replication/replication.js';
+import { type ChunkReplicator, ReplicationError } from '../replication/replication.js';
 import { NodeUnavailableError, type ReplicaReadService } from '../replication/read-service.js';
 import { RouteRateLimiter, rateLimit } from '../hardening/rate-limit.js';
 
@@ -154,10 +154,41 @@ export function registerTransferRoutes(
       }
       const payload = Buffer.concat(parts);
       database.recordPendingChunk(request.params.fileId, chunkIndex, { sizeBytes: payload.length, checksumSha256: checksum });
-      const result = await replicator.replicateChunk(chunkId, payload, checksum, 2);
-      storedSizeBytes = payload.length;
-      replicationAcknowledged = result.confirmedNodeIds.length;
-      database.markStoredChunk(request.params.fileId, chunkIndex, { sizeBytes: storedSizeBytes, checksumSha256: checksum });
+      try {
+        const result = await replicator.replicateChunk(chunkId, payload, checksum, 2);
+        storedSizeBytes = payload.length;
+        replicationAcknowledged = result.confirmedNodeIds.length;
+        database.markStoredChunk(request.params.fileId, chunkIndex, { sizeBytes: storedSizeBytes, checksumSha256: checksum });
+        database.recordClusterEvent({
+          eventType: 'CHUNK_REPLICATED',
+          severity: 'INFO',
+          fileId: request.params.fileId,
+          details: {
+            chunkId,
+            confirmedNodes: result.confirmedNodeIds,
+          },
+        });
+      } catch (error) {
+        if (error instanceof ReplicationError) {
+          database.recordClusterEvent({
+            eventType: error.confirmedNodeIds.length > 0 ? 'REPLICATION_DEGRADED' : 'REPLICATION_FAILED',
+            severity: error.confirmedNodeIds.length > 0 ? 'WARN' : 'ERROR',
+            fileId: request.params.fileId,
+            details: {
+              chunkId,
+              confirmedNodes: error.confirmedNodeIds,
+              failedNodes: error.failedNodeIds,
+              requiredFactor: error.requiredFactor,
+            },
+          });
+          return reply.code(503).send({
+            error: error.confirmedNodeIds.length > 0 ? 'REPLICATION_DEGRADED' : 'REPLICATION_FAILED',
+            confirmedReplicas: error.confirmedNodeIds.length,
+            requiredReplicas: error.requiredFactor,
+          });
+        }
+        throw error;
+      }
     } else {
       const result = await storageClient.putChunk(chunkId, request.body as NodeJS.ReadableStream, checksum);
       storedSizeBytes = result.sizeBytes;

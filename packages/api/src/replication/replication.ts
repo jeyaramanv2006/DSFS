@@ -13,6 +13,18 @@ export interface ReplicationResult {
   failedNodeIds: string[];
 }
 
+export class ReplicationError extends Error {
+  public readonly code = 'REPLICATION_FAILED' as const;
+  public constructor(
+    public readonly confirmedNodeIds: string[],
+    public readonly failedNodeIds: string[],
+    public readonly requiredFactor: number,
+  ) {
+    super(`replication failed: ${confirmedNodeIds.length}/${requiredFactor} confirmed`);
+    this.name = 'ReplicationError';
+  }
+}
+
 export interface ChunkReplicator {
   replicateChunk(
     chunkId: string,
@@ -62,7 +74,7 @@ export class ReplicationService implements ChunkReplicator {
     }
     this.database.recordConfirmedReplicas(chunkId, confirmed);
     if (confirmed.length < replicationFactor) {
-      throw new Error(`replication failed: ${confirmed.length}/${replicationFactor} confirmed`);
+      throw new ReplicationError(confirmed, failed, replicationFactor);
     }
     return { confirmedNodeIds: confirmed, failedNodeIds: failed };
   }

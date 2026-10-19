@@ -5,6 +5,7 @@ import { MetadataDatabase } from '../db/database.js';
 import { buildApiServer } from '../server.js';
 import type { StorageNodeClient, StoredChunkResult } from '../services/storage-client.js';
 import { NodeUnavailableError } from '../replication/read-service.js';
+import { ReplicationError } from '../replication/replication.js';
 
 const authToken = '000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f';
 
@@ -410,5 +411,56 @@ describe('POST /api/transfers', () => {
     });
     expect(response.statusCode).toBe(503);
     expect(response.json()).toEqual({ error: 'NODE_UNAVAILABLE' });
+  });
+
+  it('returns 503 REPLICATION_DEGRADED when required replicas are not achieved', async () => {
+    database = new MetadataDatabase();
+    const fakeReplicator = {
+      replicateChunk: async () => {
+        throw new ReplicationError(['node-1'], ['node-2'], 2);
+      },
+    };
+    app = buildApiServer(database, undefined, fakeReplicator);
+    const init = await app.inject({
+      method: 'POST',
+      url: '/api/transfers',
+      payload: { authToken, totalSizeBytes: 5, chunkCount: 1, ttlSeconds: 600 },
+    });
+    const initialized = init.json();
+    const content = Buffer.from('hello');
+    const checksum = createHash('sha256').update(content).digest('hex');
+    const upload = await app.inject({
+      method: 'PUT',
+      url: `/api/transfers/${initialized.fileId}/chunks/0`,
+      headers: {
+        authorization: `Bearer ${initialized.uploadToken}`,
+        'content-type': 'application/octet-stream',
+        'x-chunk-checksum-sha256': checksum,
+      },
+      payload: content,
+    });
+    expect(upload.statusCode).toBe(503);
+    expect(upload.json()).toEqual({
+      error: 'REPLICATION_DEGRADED',
+      confirmedReplicas: 1,
+      requiredReplicas: 2,
+    });
+
+    // Chunk must not be marked STORED
+    expect(database.countStoredChunks(initialized.fileId)).toBe(0);
+
+    // Finalize must fail
+    const finalize = await app.inject({
+      method: 'POST',
+      url: `/api/transfers/${initialized.fileId}/finalize`,
+      headers: { authorization: `Bearer ${initialized.uploadToken}` },
+      payload: { totalChunksUploaded: 1 },
+    });
+    expect(finalize.statusCode).toBe(400);
+
+    // Event must be logged
+    const events = database.listClusterEvents({ eventType: 'REPLICATION_DEGRADED' });
+    expect(events).toHaveLength(1);
+    expect(events[0].severity).toBe('WARN');
   });
 });
