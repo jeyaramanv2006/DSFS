@@ -1,4 +1,5 @@
 import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify';
+import { timingSafeEqual } from 'node:crypto';
 import { FilesystemChunkStore, type IStorageNode } from './storage.js';
 
 interface ChunkParams {
@@ -11,6 +12,19 @@ function isClientError(error: unknown): boolean {
     error.message === 'invalid SHA-256 checksum' ||
     error.message === 'checksum mismatch'
   );
+}
+
+function isAuthorized(authHeader: string | undefined, expectedSecret: string): boolean {
+  if (typeof authHeader !== 'string' || !authHeader.startsWith('Bearer ')) {
+    return false;
+  }
+  const token = authHeader.slice(7).trim();
+  const tokenBuf = Buffer.from(token, 'utf8');
+  const secretBuf = Buffer.from(expectedSecret, 'utf8');
+  if (tokenBuf.length !== secretBuf.length) {
+    return false;
+  }
+  return timingSafeEqual(tokenBuf, secretBuf);
 }
 
 async function sendNotFound(reply: FastifyReply): Promise<void> {
@@ -32,6 +46,18 @@ export function buildServer(store: IStorageNode, options: StorageServerOptions =
     'application/octet-stream',
     (_request, payload, done) => done(null, payload),
   );
+
+  if (options.clusterSecret) {
+    const expectedSecret = options.clusterSecret;
+    app.addHook('onRequest', async (request, reply) => {
+      if (request.url.startsWith('/chunks')) {
+        const authHeader = request.headers.authorization;
+        if (!isAuthorized(authHeader, expectedSecret)) {
+          return reply.code(401).send({ error: 'UNAUTHORIZED' });
+        }
+      }
+    });
+  }
 
   app.put<{ Params: ChunkParams }>('/chunks/:chunkId', async (request, reply) => {
     const checksum = request.headers['x-checksum'];

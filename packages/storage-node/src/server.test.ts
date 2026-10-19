@@ -97,4 +97,89 @@ describe('storage node HTTP server', () => {
     expect(incorrect.statusCode).toBe(400);
     expect((await app.inject({ method: 'GET', url: '/chunks/bad-checksum' })).statusCode).toBe(404);
   });
+
+  it('enforces cluster secret authentication on chunk operations when configured', async () => {
+    const authDir = await mkdtemp(join(tmpdir(), 'voidshare-auth-'));
+    const secret = 'super-secret-cluster-token-12345';
+    const authApp = buildServer(new FilesystemChunkStore(authDir, 'node-auth', 1000), {
+      clusterSecret: secret,
+    });
+
+    try {
+      const content = 'auth-test-payload';
+      const chunkChecksum = sha256(content);
+
+      // 1. Missing Authorization header -> 401
+      const noAuthPut = await authApp.inject({
+        method: 'PUT',
+        url: '/chunks/c-auth',
+        headers: {
+          'content-type': 'application/octet-stream',
+          'x-checksum': chunkChecksum,
+        },
+        payload: content,
+      });
+      expect(noAuthPut.statusCode).toBe(401);
+      expect(noAuthPut.json()).toEqual({ error: 'UNAUTHORIZED' });
+
+      // 2. Wrong secret -> 401
+      const wrongAuthGet = await authApp.inject({
+        method: 'GET',
+        url: '/chunks/c-auth',
+        headers: {
+          authorization: 'Bearer wrong-secret',
+        },
+      });
+      expect(wrongAuthGet.statusCode).toBe(401);
+      expect(wrongAuthGet.json()).toEqual({ error: 'UNAUTHORIZED' });
+
+      // 3. Valid secret -> 200
+      const validPut = await authApp.inject({
+        method: 'PUT',
+        url: '/chunks/c-auth',
+        headers: {
+          'content-type': 'application/octet-stream',
+          'x-checksum': chunkChecksum,
+          authorization: `Bearer ${secret}`,
+        },
+        payload: content,
+      });
+      expect(validPut.statusCode).toBe(200);
+
+      const validGet = await authApp.inject({
+        method: 'GET',
+        url: '/chunks/c-auth',
+        headers: {
+          authorization: `Bearer ${secret}`,
+        },
+      });
+      expect(validGet.statusCode).toBe(200);
+      expect(validGet.body).toBe(content);
+
+      const validList = await authApp.inject({
+        method: 'GET',
+        url: '/chunks',
+        headers: {
+          authorization: `Bearer ${secret}`,
+        },
+      });
+      expect(validList.statusCode).toBe(200);
+      expect(validList.json()).toEqual({ chunks: ['c-auth'] });
+
+      // 4. Delete with valid secret -> 200
+      const validDel = await authApp.inject({
+        method: 'DELETE',
+        url: '/chunks/c-auth',
+        headers: {
+          authorization: `Bearer ${secret}`,
+        },
+      });
+      expect(validDel.statusCode).toBe(200);
+      expect(validDel.json()).toEqual({ deleted: true });
+    } finally {
+      await authApp.close();
+      await rm(authDir, { recursive: true, force: true });
+    }
+  });
 });
+
