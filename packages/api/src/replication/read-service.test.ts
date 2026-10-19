@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { describe, expect, it } from 'vitest';
 import { MetadataDatabase } from '../db/database.js';
@@ -12,7 +13,7 @@ class ReadNode implements Pick<StorageNodeClient, 'getChunk'> {
   }
 }
 
-function setup() {
+function setup(expectedPayload = 'from-b') {
   const database = new MetadataDatabase();
   database.registerStorageNode({ nodeId: 'node-a', endpointUrl: 'http://a', status: 'UNHEALTHY' });
   database.registerStorageNode({ nodeId: 'node-b', endpointUrl: 'http://b', status: 'HEALTHY' });
@@ -22,29 +23,56 @@ function setup() {
     chunkSizeBytes: 4, encryptedFileName: null, ttlSeconds: 600, maxDownloads: 1,
   });
   const chunkId = `${created.fileId}-0`;
-  database.db.prepare(`INSERT INTO chunks (chunk_id, file_id, chunk_index, size_bytes, checksum_sha256, status) VALUES (?, ?, 0, 4, ?, 'STORED')`)
-    .run(chunkId, created.fileId, 'a'.repeat(64));
+  const checksum = createHash('sha256').update(expectedPayload).digest('hex');
+  database.db.prepare(`INSERT INTO chunks (chunk_id, file_id, chunk_index, size_bytes, checksum_sha256, status) VALUES (?, ?, 0, ?, ?, 'STORED')`)
+    .run(chunkId, created.fileId, expectedPayload.length, checksum);
   database.recordConfirmedReplicas(chunkId, ['node-a', 'node-b', 'node-c']);
-  return { database, chunkId };
+  return { database, chunkId, fileId: created.fileId, checksum };
 }
 
 describe('replica read failover', () => {
   it('orders healthy replicas first and succeeds after a failed candidate', async () => {
-    const { database, chunkId } = setup();
+    const { database, chunkId } = setup('from-c');
     const attempts: string[] = [];
     const targets: ReplicaReadTarget[] = [
       { nodeId: 'node-a', client: { getChunk: async () => { attempts.push('node-a'); throw new Error('down'); } } },
-      { nodeId: 'node-b', client: { getChunk: async () => { attempts.push('node-b'); return Readable.from(Buffer.from('from-b')); } } },
+      { nodeId: 'node-b', client: { getChunk: async () => { attempts.push('node-b'); throw new Error('node b down'); } } },
       { nodeId: 'node-c', client: { getChunk: async () => { attempts.push('node-c'); return Readable.from(Buffer.from('from-c')); } } },
     ];
     const stream = await new ReplicaReadService(database, targets).getChunk(chunkId);
-    expect(attempts).toEqual(['node-b']);
-    expect(await streamToString(stream)).toBe('from-b');
+    expect(attempts).toEqual(['node-b', 'node-c']);
+    expect(await streamToString(stream)).toBe('from-c');
+
+    // Failover event should be recorded
+    const failoverEvents = database.listClusterEvents({ eventType: 'READ_FAILOVER_SUCCEEDED' });
+    expect(failoverEvents).toHaveLength(1);
+    expect(failoverEvents[0].node_id).toBe('node-c');
+    expect(failoverEvents[0].details).toContain('node-b');
+
     database.close();
   });
 
-  it('tries every replica and returns a typed NODE_UNAVAILABLE error after exhaustion', async () => {
-    const { database, chunkId } = setup();
+  it('fails over to secondary replica when primary replica returns corrupted data', async () => {
+    const { database, chunkId } = setup('valid-uncorrupted-data');
+    const targets: ReplicaReadTarget[] = [
+      { nodeId: 'node-a', client: { getChunk: async () => Readable.from(Buffer.from('unhealthy-node')) } },
+      { nodeId: 'node-b', client: { getChunk: async () => Readable.from(Buffer.from('corrupted-data-bitrot')) } },
+      { nodeId: 'node-c', client: { getChunk: async () => Readable.from(Buffer.from('valid-uncorrupted-data')) } },
+    ];
+
+    const stream = await new ReplicaReadService(database, targets).getChunk(chunkId);
+    expect(await streamToString(stream)).toBe('valid-uncorrupted-data');
+
+    const failoverEvents = database.listClusterEvents({ eventType: 'READ_FAILOVER_SUCCEEDED' });
+    expect(failoverEvents).toHaveLength(1);
+    expect(failoverEvents[0].node_id).toBe('node-c');
+    expect(failoverEvents[0].details).toContain('node-b');
+
+    database.close();
+  });
+
+  it('tries every replica and records CHUNK_UNAVAILABLE event after exhaustion', async () => {
+    const { database, chunkId } = setup('expected-data');
     const targets: ReplicaReadTarget[] = [
       { nodeId: 'node-a', client: new ReadNode('fail') },
       { nodeId: 'node-b', client: new ReadNode('fail') },
@@ -52,6 +80,11 @@ describe('replica read failover', () => {
     ];
     await expect(new ReplicaReadService(database, targets).getChunk(chunkId))
       .rejects.toBeInstanceOf(NodeUnavailableError);
+
+    const unavailableEvents = database.listClusterEvents({ eventType: 'CHUNK_UNAVAILABLE' });
+    expect(unavailableEvents).toHaveLength(1);
+    expect(unavailableEvents[0].severity).toBe('ERROR');
+
     database.close();
   });
 });

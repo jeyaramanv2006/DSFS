@@ -199,6 +199,24 @@ export class MetadataDatabase {
     ).pluck().all(fileId) as number[];
   }
 
+  public getChunk(chunkId: string): {
+    chunk_id: string;
+    file_id: string;
+    chunk_index: number;
+    size_bytes: number;
+    checksum_sha256: string;
+    status: string;
+  } | undefined {
+    return this.db.prepare('SELECT * FROM chunks WHERE chunk_id = ?').get(chunkId) as {
+      chunk_id: string;
+      file_id: string;
+      chunk_index: number;
+      size_bytes: number;
+      checksum_sha256: string;
+      status: string;
+    } | undefined;
+  }
+
   public registerStorageNode(input: {
     nodeId: string;
     endpointUrl: string;
