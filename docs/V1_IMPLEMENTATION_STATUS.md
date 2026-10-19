@@ -13,8 +13,8 @@
 | **Phase 0** | Repository Inventory & Baseline | 🟢 Done | 2 | `npm test` 62 passed, baseline inventory recorded |
 | **Phase 1** | Restore Build & Fix Critical Correctness | 🟢 Done | 4 | `npm test` 69 passed, `npm run build` PASS (all 5 workspaces) |
 | **Phase 2** | Three-PC LAN Configuration & Service Auth | 🟢 Done | 4 | `npm test` 72 passed, `npm run build` PASS, 3-PC setup guide added |
-| **Phase 3** | Heartbeats & Continuous Health Monitoring | 🔴 Not Started | 0 | Ready to proceed |
-| **Phase 4** | Replica Reads, Workers & Durability | 🔴 Not Started | 0 | Pending Phase 3 |
+| **Phase 3** | Heartbeats & Continuous Health Monitoring | 🟢 Done | 4 | `npm test` 81 passed, `npm run build` PASS across all workspaces |
+| **Phase 4** | Replica Reads, Workers & Durability | 🔴 Not Started | 0 | Ready to proceed after approval |
 | **Phase 5** | Retrieval Codes (with Share Links) | 🔴 Not Started | 0 | Pending Phase 4 |
 | **Phase 6** | Real Cluster Dashboard | 🔴 Not Started | 0 | Pending Phase 5 |
 | **Phase 7** | End-to-End Verification & Hardening | 🔴 Not Started | 0 | Pending Phase 6 |
@@ -36,6 +36,11 @@
 | **Phase 2** | `c41ffd8` | `feat(storage-node): authenticate internal chunk operations` | Added `timingSafeEqual` Bearer header auth on chunk routes with 401 on mismatch | `server.test.ts`: 4/4 PASS; negative auth verified | Heartbeat route auth |
 | **Phase 2** | `5ce4b29` | `feat(api): secure and validate node heartbeat registration` | Authenticated `/api/nodes/heartbeat`, rejected unknown nodes and endpoint changes | `routes.test.ts`: 4/4 PASS; full `npm test`: 72/72 PASS | Three-PC setup guide |
 | **Phase 2** | `711ce64` | `docs: document three-PC LAN setup and firewall rules` | Detailed network topology, Windows firewall commands, and startup runbook | Verified clean configs | Update tracker, prompt user |
+| **Phase 2** | `2c59694` | `docs: record Phase 2 completion and verified test results in status tracker` | Status tracker updated with Phase 2 status and commit links | Status verified | Phase 3 start |
+| **Phase 3** | `e2cf455` | `feat(storage-node): emit periodic authenticated heartbeats` | Added `StorageNodeHeartbeatEmitter` with active ops tracking and backoff | `heartbeat.test.ts`: 3/3 PASS | Autonomous health monitor |
+| **Phase 3** | `1949537` | `feat(api): run autonomous node health monitoring with configurable thresholds` | Added `start()`/`stop()` timer lifecycle, default epoch heartbeat for UNAVAILABLE nodes | `monitor.test.ts`: 4/4 PASS; `npm test`: 77/77 PASS | Cluster events persistence |
+| **Phase 3** | `2f95f7c` | `feat(api): record cluster health transition events on node state changes` | Added `cluster_events` table and persisted transitions (`NODE_UNHEALTHY`, `NODE_UNAVAILABLE`, `NODE_RECOVERED`, `HEARTBEAT_REJECTED`) | `database.test.ts`: 8/8 PASS; `routes.test.ts`: 4/4 PASS; `npm test`: 79/79 PASS | Graceful shutdown hooks |
+| **Phase 3** | `6ef1a79` | `fix(api): stop health monitor and heartbeat timers cleanly on shutdown` | Added SIGINT/SIGTERM handlers and Fastify `onClose` hooks stopping background loops | `server.test.ts`: 5/5 PASS; `monitor.test.ts`: 6/6 PASS; full `npm test`: 81/81 PASS | Update tracker, prompt user |
 
 ---
 
@@ -66,12 +71,12 @@
 - [x] Automated auth negative and positive tests (72 tests pass).
 
 ### Phase 3: Heartbeats & Health Monitoring
-- [ ] Storage node periodic heartbeat emitter with active operation tracking and backoff.
-- [ ] Coordinator heartbeat receiver updating timestamps, capacity, and active operations.
-- [ ] Autonomous `HealthMonitor` loop running at startup with configurable thresholds.
-- [ ] Cluster state transition events persisted to SQLite `cluster_events`.
-- [ ] Clean shutdown handling for all timers and background loops.
-- [ ] Automated tests for missed heartbeats, recovery, and transitions.
+- [x] Storage node periodic heartbeat emitter with active operation tracking and backoff (`e2cf455`).
+- [x] Coordinator heartbeat receiver updating timestamps, capacity, and active operations (`e2cf455`).
+- [x] Autonomous `HealthMonitor` loop running at startup with configurable thresholds (`1949537`).
+- [x] Cluster state transition events persisted to SQLite `cluster_events` (`2f95f7c`).
+- [x] Clean shutdown handling for all timers and background loops (`6ef1a79`).
+- [x] Automated tests for missed heartbeats, recovery, and transitions (81 tests pass).
 
 ### Phase 4: Replica Reads, Workers & Durability
 - [ ] Read failover to recorded healthy replicas (`ReplicaReadService` + routes).
