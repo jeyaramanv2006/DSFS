@@ -213,6 +213,10 @@ export class MetadataDatabase {
     this.db.prepare('UPDATE storage_nodes SET status = ? WHERE node_id = ?').run(status, nodeId);
   }
 
+  public getStorageNode(nodeId: string): StorageNodeRecord | undefined {
+    return this.db.prepare('SELECT * FROM storage_nodes WHERE node_id = ?').get(nodeId) as StorageNodeRecord | undefined;
+  }
+
   public listStorageNodes(status?: string): StorageNodeRecord[] {
     if (status === undefined) {
       return this.db.prepare('SELECT * FROM storage_nodes ORDER BY node_id').all() as StorageNodeRecord[];

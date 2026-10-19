@@ -54,4 +54,8 @@ export class HealthMonitor {
   public listNodes(): StorageNodeRecord[] {
     return this.database.listStorageNodes();
   }
+
+  public getStorageNode(nodeId: string): StorageNodeRecord | undefined {
+    return this.database.getStorageNode(nodeId);
+  }
 }

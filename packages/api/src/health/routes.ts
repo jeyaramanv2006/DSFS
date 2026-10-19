@@ -1,7 +1,21 @@
 import type { FastifyInstance } from 'fastify';
+import { timingSafeEqual } from 'node:crypto';
 import { HealthMonitor, type HeartbeatInput } from './monitor.js';
 
 interface HeartbeatBody extends HeartbeatInput {}
+
+function isAuthorized(authHeader: string | undefined, expectedSecret: string): boolean {
+  if (typeof authHeader !== 'string' || !authHeader.startsWith('Bearer ')) {
+    return false;
+  }
+  const token = authHeader.slice(7).trim();
+  const tokenBuf = Buffer.from(token, 'utf8');
+  const secretBuf = Buffer.from(expectedSecret, 'utf8');
+  if (tokenBuf.length !== secretBuf.length) {
+    return false;
+  }
+  return timingSafeEqual(tokenBuf, secretBuf);
+}
 
 function validHeartbeat(body: Partial<HeartbeatBody>): body is HeartbeatBody {
   const { nodeId, endpointUrl, totalCapacityBytes, usedCapacityBytes, activeOperations } = body;
@@ -13,12 +27,37 @@ function validHeartbeat(body: Partial<HeartbeatBody>): body is HeartbeatBody {
     typeof activeOperations === 'number' && Number.isSafeInteger(activeOperations) && activeOperations >= 0;
 }
 
-export function registerHealthRoutes(app: FastifyInstance, monitor: HealthMonitor): void {
+export interface HealthRouteOptions {
+  clusterSecret?: string;
+  allowedNodeIds?: string[];
+}
+
+export function registerHealthRoutes(
+  app: FastifyInstance,
+  monitor: HealthMonitor,
+  options: HealthRouteOptions = {},
+): void {
   app.post<{ Body: Partial<HeartbeatBody> }>('/api/nodes/heartbeat', async (request, reply) => {
+    if (options.clusterSecret) {
+      if (!isAuthorized(request.headers.authorization, options.clusterSecret)) {
+        return reply.code(401).send({ error: 'UNAUTHORIZED' });
+      }
+    }
+
     const body = request.body ?? {};
     if (!validHeartbeat(body)) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR' });
     }
+
+    if (options.allowedNodeIds && !options.allowedNodeIds.includes(body.nodeId)) {
+      return reply.code(403).send({ error: 'NODE_NOT_CONFIGURED' });
+    }
+
+    const existingNode = monitor.getStorageNode(body.nodeId);
+    if (existingNode && existingNode.endpoint_url !== body.endpointUrl) {
+      return reply.code(403).send({ error: 'ENDPOINT_MISMATCH' });
+    }
+
     monitor.recordHeartbeat(body);
     return reply.code(200).send({ acknowledged: true });
   });

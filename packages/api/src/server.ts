@@ -32,6 +32,9 @@ export function buildApiServer(
     (_request, payload, done) => done(null, payload),
   );
   registerTransferRoutes(app, database, resolvedStorageClient, replicator, readService, options.rateLimiter);
-  registerHealthRoutes(app, healthMonitor);
+  registerHealthRoutes(app, healthMonitor, {
+    clusterSecret: options.clusterSecret,
+    allowedNodeIds: options.allowedNodeIds,
+  });
   return app;
 }
