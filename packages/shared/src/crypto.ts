@@ -2,7 +2,7 @@ const SECRET_BYTES = 32;
 const CHUNK_IV_BYTES = 12;
 const CHUNK_TAG_BITS = 128;
 const HKDF_SALT = new Uint8Array(32);
-const FILENAME_IV = new Uint8Array(CHUNK_IV_BYTES);
+const FILENAME_ENVELOPE_VERSION = 1;
 
 function getCrypto(): Crypto {
   if (!globalThis.crypto?.subtle) {
@@ -190,28 +190,41 @@ export async function sha256(buffer: Uint8Array): Promise<string> {
 
 export async function encryptFilename(filename: string, secret: string): Promise<string> {
   const key = await deriveFilenameKey(secret);
+  const iv = new Uint8Array(CHUNK_IV_BYTES);
+  getCrypto().getRandomValues(iv);
   const encrypted = await getCrypto().subtle.encrypt(
     {
       name: 'AES-GCM',
-      iv: FILENAME_IV as BufferSource,
+      iv: iv as BufferSource,
       tagLength: CHUNK_TAG_BITS,
     },
     key,
     new TextEncoder().encode(filename) as BufferSource,
   );
-  return bytesToBase64(new Uint8Array(encrypted));
+  const payload = new Uint8Array(1 + CHUNK_IV_BYTES + encrypted.byteLength);
+  payload[0] = FILENAME_ENVELOPE_VERSION;
+  payload.set(iv, 1);
+  payload.set(new Uint8Array(encrypted), 1 + CHUNK_IV_BYTES);
+  return bytesToBase64(payload);
 }
 
 export async function decryptFilename(payload: string, secret: string): Promise<string> {
   const key = await deriveFilenameKey(secret);
+  const bytes = base64ToBytes(payload);
+  const minLength = 1 + CHUNK_IV_BYTES + CHUNK_TAG_BITS / 8;
+  if (bytes.length < minLength || bytes[0] !== FILENAME_ENVELOPE_VERSION) {
+    throw new Error('unsupported or invalid filename encryption envelope');
+  }
+  const iv = bytes.slice(1, 1 + CHUNK_IV_BYTES);
+  const ciphertext = bytes.slice(1 + CHUNK_IV_BYTES);
   const decrypted = await getCrypto().subtle.decrypt(
     {
       name: 'AES-GCM',
-      iv: FILENAME_IV as BufferSource,
+      iv: iv as BufferSource,
       tagLength: CHUNK_TAG_BITS,
     },
     key,
-    base64ToBytes(payload) as BufferSource,
+    ciphertext as BufferSource,
   );
   return new TextDecoder().decode(decrypted);
 }

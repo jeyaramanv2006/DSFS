@@ -135,4 +135,61 @@ describe('secret generation and key derivation', () => {
       ),
     ).rejects.toThrow();
   });
+
+  it('generates unique IVs and distinct ciphertexts across repeated encryptions', async () => {
+    const secret = '000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f';
+    const filename = 'sensitive-data.csv';
+
+    const enc1 = await encryptFilename(filename, secret);
+    const enc2 = await encryptFilename(filename, secret);
+
+    expect(enc1).not.toBe(enc2);
+
+    const bytes1 = Uint8Array.from(atob(enc1), (c) => c.charCodeAt(0));
+    const bytes2 = Uint8Array.from(atob(enc2), (c) => c.charCodeAt(0));
+
+    // Envelope version byte 0x01
+    expect(bytes1[0]).toBe(1);
+    expect(bytes2[0]).toBe(1);
+
+    // IV is bytes 1..12
+    const iv1 = bytes1.slice(1, 13);
+    const iv2 = bytes2.slice(1, 13);
+    expect(iv1).not.toEqual(iv2);
+
+    await expect(decryptFilename(enc1, secret)).resolves.toBe(filename);
+    await expect(decryptFilename(enc2, secret)).resolves.toBe(filename);
+  });
+
+  it('rejects a tampered encrypted filename', async () => {
+    const secret = '000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f';
+    const encrypted = await encryptFilename('document.docx', secret);
+    const bytes = Uint8Array.from(atob(encrypted), (c) => c.charCodeAt(0));
+
+    // Tamper with ciphertext byte
+    bytes[bytes.length - 1] ^= 0x01;
+    const tampered = btoa(String.fromCharCode(...bytes));
+
+    await expect(decryptFilename(tampered, secret)).rejects.toThrow();
+  });
+
+  it('rejects an invalid envelope version or truncated payload', async () => {
+    const secret = '000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f';
+    const encrypted = await encryptFilename('doc.txt', secret);
+    const bytes = Uint8Array.from(atob(encrypted), (c) => c.charCodeAt(0));
+
+    // Tamper with envelope version byte (set to 2)
+    bytes[0] = 2;
+    const invalidVersion = btoa(String.fromCharCode(...bytes));
+    await expect(decryptFilename(invalidVersion, secret)).rejects.toThrow(
+      'unsupported or invalid filename encryption envelope',
+    );
+
+    // Payload too short (< 29 bytes)
+    const tooShort = btoa(String.fromCharCode(...bytes.slice(0, 20)));
+    await expect(decryptFilename(tooShort, secret)).rejects.toThrow(
+      'unsupported or invalid filename encryption envelope',
+    );
+  });
 });
+
