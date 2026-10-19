@@ -178,12 +178,13 @@ const endpointUrl = process.env.ENDPOINT_URL ?? `http://${host === '0.0.0.0' ? '
 const heartbeatIntervalMs = Number(process.env.HEARTBEAT_INTERVAL_MS ?? 2000);
 
 if (process.argv[1]?.endsWith('server.ts') || process.argv[1]?.endsWith('server.js')) {
+  const store = new FilesystemChunkStore(
+    dataDir,
+    nodeId,
+    Number(process.env.TOTAL_CAPACITY_BYTES ?? 0),
+  );
   const app = buildServer(
-    new FilesystemChunkStore(
-      dataDir,
-      nodeId,
-      Number(process.env.TOTAL_CAPACITY_BYTES ?? 0),
-    ),
+    store,
     {
       clusterSecret,
       coordinatorUrl,
@@ -193,6 +194,21 @@ if (process.argv[1]?.endsWith('server.ts') || process.argv[1]?.endsWith('server.
       autoStartHeartbeat: true,
     },
   );
+
+  let shuttingDown = false;
+  const shutdown = async (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    try {
+      await app.close();
+    } catch {
+      process.exitCode = 1;
+    }
+  };
+
+  process.on('SIGINT', () => void shutdown('SIGINT'));
+  process.on('SIGTERM', () => void shutdown('SIGTERM'));
+
   app.listen({ host, port }).catch((error) => {
     app.log.error(error);
     process.exitCode = 1;

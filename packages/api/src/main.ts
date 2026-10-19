@@ -57,6 +57,24 @@ const app = buildApiServer(
   },
 );
 
+let shuttingDown = false;
+const shutdown = async (signal: string) => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  app.log.info({ signal }, 'Shutting down API server gracefully...');
+  try {
+    healthMonitor.stop();
+    await app.close();
+    database.close();
+  } catch (err) {
+    app.log.error(err, 'Error during shutdown');
+    process.exitCode = 1;
+  }
+};
+
+process.on('SIGINT', () => void shutdown('SIGINT'));
+process.on('SIGTERM', () => void shutdown('SIGTERM'));
+
 try {
   await app.listen({
     host: process.env.HOST ?? '0.0.0.0',
@@ -64,6 +82,8 @@ try {
   });
 } catch (error) {
   app.log.error(error);
+  healthMonitor.stop();
   database.close();
   process.exitCode = 1;
 }
+

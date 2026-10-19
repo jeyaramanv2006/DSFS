@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { MetadataDatabase } from '../db/database.js';
 import { HealthMonitor } from './monitor.js';
+import { buildApiServer } from '../server.js';
 
 describe('storage node health monitor', () => {
   it('records heartbeats and transitions stale nodes through unhealthy to unavailable', () => {
@@ -128,6 +129,18 @@ describe('storage node health monitor', () => {
     expect(events[0].event_type).toBe('HEARTBEAT_REJECTED');
     expect(events[0].severity).toBe('WARN');
 
+    database.close();
+  });
+
+  it('stops health monitor timer cleanly when api server closes', async () => {
+    const database = new MetadataDatabase();
+    const monitor = new HealthMonitor(database);
+    monitor.start(50);
+    expect(monitor.isStarted()).toBe(true);
+
+    const app = buildApiServer(database, undefined, undefined, undefined, monitor);
+    await app.close();
+    expect(monitor.isStarted()).toBe(false);
     database.close();
   });
 });

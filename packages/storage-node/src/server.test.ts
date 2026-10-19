@@ -181,5 +181,16 @@ describe('storage node HTTP server', () => {
       await rm(authDir, { recursive: true, force: true });
     }
   });
+
+  it('stops heartbeat emitter cleanly when server closes', async () => {
+    const testDir = await mkdtemp(join(tmpdir(), 'voidshare-close-'));
+    const testApp = buildServer(new FilesystemChunkStore(testDir, 'node-close', 1000), {
+      coordinatorUrl: 'http://localhost:59999',
+      autoStartHeartbeat: true,
+      heartbeatIntervalMs: 50,
+    });
+    await expect(testApp.close()).resolves.toBeUndefined();
+    await rm(testDir, { recursive: true, force: true });
+  });
 });
 
