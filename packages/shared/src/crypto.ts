@@ -167,6 +167,83 @@ function base64ToBytes(value: string): Uint8Array {
   return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
 
+export function bytesToBase64Url(bytes: Uint8Array): string {
+  return bytesToBase64(bytes)
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
+
+export function base64UrlToBytes(code: string): Uint8Array {
+  if (typeof code !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(code)) {
+    throw new Error('invalid retrieval code: must be 43 URL-safe Base64 characters');
+  }
+  let base64 = code.replace(/-/g, '+').replace(/_/g, '/');
+  while (base64.length % 4 !== 0) {
+    base64 += '=';
+  }
+  try {
+    const bytes = base64ToBytes(base64);
+    if (bytes.length !== SECRET_BYTES) {
+      throw new Error('invalid retrieval code: decoded length must be 32 bytes');
+    }
+    return bytes;
+  } catch {
+    throw new Error('invalid retrieval code: malformed base64url content');
+  }
+}
+
+export function encodeRetrievalCode(secret: string | Uint8Array): string {
+  let bytes: Uint8Array;
+  if (typeof secret === 'string') {
+    bytes = hexToBytes(secret);
+  } else if (secret instanceof Uint8Array) {
+    if (secret.length !== SECRET_BYTES) {
+      throw new Error(`secret must be exactly ${SECRET_BYTES} bytes`);
+    }
+    bytes = secret;
+  } else {
+    throw new Error('secret must be 32 bytes or 64-character hex string');
+  }
+  const code = bytesToBase64Url(bytes);
+  if (code.length !== 43) {
+    throw new Error('retrieval code must be exactly 43 characters');
+  }
+  return code;
+}
+
+export function decodeRetrievalCode(code: string): string {
+  const bytes = base64UrlToBytes(code);
+  return bytesToHex(bytes);
+}
+
+export function decodeRetrievalCodeToBytes(code: string): Uint8Array {
+  return base64UrlToBytes(code);
+}
+
+export function isValidRetrievalCode(code: unknown): code is string {
+  if (typeof code !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(code)) {
+    return false;
+  }
+  try {
+    const bytes = base64UrlToBytes(code);
+    return bytes.length === SECRET_BYTES;
+  } catch {
+    return false;
+  }
+}
+
+export function normalizeSecret(input: string): string {
+  const trimmed = input.trim();
+  if (/^[0-9a-f]{64}$/i.test(trimmed)) {
+    return trimmed.toLowerCase();
+  }
+  if (isValidRetrievalCode(trimmed)) {
+    return decodeRetrievalCode(trimmed);
+  }
+  throw new Error('secret must be 64-character hex or 43-character retrieval code');
+}
+
 async function deriveFilenameKey(secret: string): Promise<CryptoKey> {
   const baseKey = await importSecret(secret);
   return getCrypto().subtle.deriveKey(

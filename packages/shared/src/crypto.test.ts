@@ -8,6 +8,11 @@ import {
   encryptFilename,
   generateSecret,
   sha256,
+  encodeRetrievalCode,
+  decodeRetrievalCode,
+  decodeRetrievalCodeToBytes,
+  isValidRetrievalCode,
+  normalizeSecret,
 } from './crypto.js';
 
 describe('secret generation and key derivation', () => {
@@ -192,4 +197,83 @@ describe('secret generation and key derivation', () => {
     );
   });
 });
+
+describe('retrieval code encoding, decoding, and validation', () => {
+  const hexSecret = '000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f';
+
+  it('encodes a 32-byte secret into an unpadded 43-character URL-safe string', () => {
+    const code = encodeRetrievalCode(hexSecret);
+
+    expect(code).toHaveLength(43);
+    expect(code).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(code).not.toContain('=');
+    expect(code).not.toContain('+');
+    expect(code).not.toContain('/');
+  });
+
+  it('encodes from Uint8Array and roundtrips back to hex and bytes', () => {
+    const rawBytes = new Uint8Array(32);
+    for (let i = 0; i < 32; i++) rawBytes[i] = i;
+
+    const code = encodeRetrievalCode(rawBytes);
+    expect(code).toHaveLength(43);
+
+    const decodedHex = decodeRetrievalCode(code);
+    expect(decodedHex).toBe(hexSecret);
+
+    const decodedBytes = decodeRetrievalCodeToBytes(code);
+    expect(decodedBytes).toEqual(rawBytes);
+  });
+
+  it('accurately validates format using isValidRetrievalCode', () => {
+    const validCode = encodeRetrievalCode(hexSecret);
+    expect(isValidRetrievalCode(validCode)).toBe(true);
+
+    // Invalid lengths
+    expect(isValidRetrievalCode(validCode.slice(0, 42))).toBe(false);
+    expect(isValidRetrievalCode(`${validCode}A`)).toBe(false);
+    expect(isValidRetrievalCode('')).toBe(false);
+
+    // Invalid characters
+    expect(isValidRetrievalCode(validCode.slice(0, 42) + '+')).toBe(false);
+    expect(isValidRetrievalCode(validCode.slice(0, 42) + '/')).toBe(false);
+    expect(isValidRetrievalCode(validCode.slice(0, 42) + '=')).toBe(false);
+    expect(isValidRetrievalCode(validCode.slice(0, 42) + ' ')).toBe(false);
+
+    // Non-string types
+    expect(isValidRetrievalCode(null)).toBe(false);
+    expect(isValidRetrievalCode(undefined)).toBe(false);
+    expect(isValidRetrievalCode(12345)).toBe(false);
+    expect(isValidRetrievalCode({ code: validCode })).toBe(false);
+  });
+
+  it('normalizes hex secrets and retrieval codes interchangeably', () => {
+    const code = encodeRetrievalCode(hexSecret);
+
+    // Normalizing hex secret
+    expect(normalizeSecret(hexSecret)).toBe(hexSecret);
+    expect(normalizeSecret(hexSecret.toUpperCase())).toBe(hexSecret);
+
+    // Normalizing retrieval code
+    expect(normalizeSecret(code)).toBe(hexSecret);
+
+    // Rejects invalid strings
+    expect(() => normalizeSecret('invalid-string')).toThrow(
+      'secret must be 64-character hex or 43-character retrieval code',
+    );
+  });
+
+  it('rejects invalid inputs to encodeRetrievalCode and decodeRetrievalCode', () => {
+    expect(() => encodeRetrievalCode('too-short')).toThrow(
+      'secret must be exactly 32 bytes encoded as hex',
+    );
+    expect(() => encodeRetrievalCode(new Uint8Array(16))).toThrow(
+      'secret must be exactly 32 bytes',
+    );
+    expect(() => decodeRetrievalCode('too-short')).toThrow(
+      'invalid retrieval code: must be 43 URL-safe Base64 characters',
+    );
+  });
+});
+
 
