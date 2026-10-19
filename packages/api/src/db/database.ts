@@ -404,10 +404,11 @@ export class MetadataDatabase {
     return this.db.prepare(`
       SELECT c.chunk_id, c.size_bytes, c.checksum_sha256,
              t.status AS transfer_status,
-             COUNT(CASE WHEN r.status = 'ACTIVE' THEN 1 END) AS active_replica_count
+             COUNT(CASE WHEN r.status = 'ACTIVE' AND s.status = 'HEALTHY' THEN 1 END) AS active_replica_count
       FROM chunks c
       JOIN transfers t ON t.file_id = c.file_id
       LEFT JOIN chunk_replicas r ON r.chunk_id = c.chunk_id
+      LEFT JOIN storage_nodes s ON s.node_id = r.node_id
       WHERE c.status = 'STORED'
         AND t.status NOT IN ('DELETING', 'EXPIRED', 'DELETED')
       GROUP BY c.chunk_id
