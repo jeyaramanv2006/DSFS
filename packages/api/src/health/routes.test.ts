@@ -147,6 +147,11 @@ describe('node health routes', () => {
     expect(matched.statusCode).toBe(200);
     expect(matched.json()).toEqual({ acknowledged: true });
 
+    const rejectedEvents = database.listClusterEvents({ eventType: 'HEARTBEAT_REJECTED' });
+    expect(rejectedEvents).toHaveLength(2);
+    expect(rejectedEvents.some((e) => e.node_id === 'node-rogue')).toBe(true);
+    expect(rejectedEvents.some((e) => e.node_id === 'node-1')).toBe(true);
+
     await app.close();
     database.close();
   });

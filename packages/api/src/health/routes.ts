@@ -40,21 +40,25 @@ export function registerHealthRoutes(
   app.post<{ Body: Partial<HeartbeatBody> }>('/api/nodes/heartbeat', async (request, reply) => {
     if (options.clusterSecret) {
       if (!isAuthorized(request.headers.authorization, options.clusterSecret)) {
+        monitor.recordRejectedHeartbeat({ reason: 'UNAUTHORIZED' });
         return reply.code(401).send({ error: 'UNAUTHORIZED' });
       }
     }
 
     const body = request.body ?? {};
     if (!validHeartbeat(body)) {
+      monitor.recordRejectedHeartbeat({ nodeId: typeof body.nodeId === 'string' ? body.nodeId : undefined, reason: 'VALIDATION_ERROR' });
       return reply.code(400).send({ error: 'VALIDATION_ERROR' });
     }
 
     if (options.allowedNodeIds && !options.allowedNodeIds.includes(body.nodeId)) {
+      monitor.recordRejectedHeartbeat({ nodeId: body.nodeId, endpointUrl: body.endpointUrl, reason: 'NODE_NOT_CONFIGURED' });
       return reply.code(403).send({ error: 'NODE_NOT_CONFIGURED' });
     }
 
     const existingNode = monitor.getStorageNode(body.nodeId);
     if (existingNode && existingNode.endpoint_url !== body.endpointUrl) {
+      monitor.recordRejectedHeartbeat({ nodeId: body.nodeId, endpointUrl: body.endpointUrl, reason: 'ENDPOINT_MISMATCH' });
       return reply.code(403).send({ error: 'ENDPOINT_MISMATCH' });
     }
 

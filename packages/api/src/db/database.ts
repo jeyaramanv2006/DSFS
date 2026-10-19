@@ -62,6 +62,28 @@ export interface DeletionChunk {
   replicas: Array<{ node_id: string; status: string }>;
 }
 
+export type EventSeverity = 'INFO' | 'WARN' | 'ERROR';
+
+export interface RecordClusterEventInput {
+  id?: string;
+  eventType: string;
+  severity?: EventSeverity;
+  nodeId?: string;
+  fileId?: string;
+  details?: Record<string, unknown> | string;
+  createdAt?: string;
+}
+
+export interface ClusterEventRow {
+  id: string;
+  event_type: string;
+  severity: EventSeverity;
+  node_id: string | null;
+  file_id: string | null;
+  details: string | null;
+  created_at: string;
+}
+
 const DEFAULT_SCHEMA_PATH = fileURLToPath(new URL('./schema.sql', import.meta.url));
 
 function hashesEqual(left: string, right: string): boolean {
@@ -463,6 +485,59 @@ export class MetadataDatabase {
       return 'IN_PROGRESS';
     }
     return transfer.status === 'READY' || transfer.status === 'DOWNLOADING' ? 'AVAILABLE' : 'INVALID';
+  }
+
+  public recordClusterEvent(input: RecordClusterEventInput): ClusterEventRow {
+    const id = input.id ?? createFileId();
+    const severity = input.severity ?? 'INFO';
+    const createdAt = input.createdAt ?? new Date().toISOString();
+    const details = typeof input.details === 'object' && input.details !== null
+      ? JSON.stringify(input.details)
+      : (input.details ?? null);
+
+    this.db.prepare(`
+      INSERT INTO cluster_events (id, event_type, severity, node_id, file_id, details, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(id, input.eventType, severity, input.nodeId ?? null, input.fileId ?? null, details, createdAt);
+
+    return {
+      id,
+      event_type: input.eventType,
+      severity,
+      node_id: input.nodeId ?? null,
+      file_id: input.fileId ?? null,
+      details,
+      created_at: createdAt,
+    };
+  }
+
+  public listClusterEvents(options?: {
+    limit?: number;
+    nodeId?: string;
+    eventType?: string;
+  }): ClusterEventRow[] {
+    const limit = options?.limit ?? 100;
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+
+    if (options?.nodeId) {
+      conditions.push('node_id = ?');
+      params.push(options.nodeId);
+    }
+    if (options?.eventType) {
+      conditions.push('event_type = ?');
+      params.push(options.eventType);
+    }
+
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    params.push(limit);
+
+    return this.db.prepare(`
+      SELECT * FROM cluster_events
+      ${where}
+      ORDER BY created_at DESC, rowid DESC
+      LIMIT ?
+    `).all(...params) as ClusterEventRow[];
   }
 
   public close(): void {

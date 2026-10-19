@@ -10,6 +10,7 @@ describe('metadata database migrations', () => {
       { name: 'chunk_placements' },
       { name: 'chunk_replicas' },
       { name: 'chunks' },
+      { name: 'cluster_events' },
       { name: 'storage_nodes' },
       { name: 'transfers' },
     ]);
@@ -21,7 +22,54 @@ describe('metadata database migrations', () => {
     );
 
     database.migrate();
-    expect(database.db.prepare("SELECT count(*) AS count FROM sqlite_master WHERE type = 'table'").pluck().get()).toBe(5);
+    expect(database.db.prepare("SELECT count(*) AS count FROM sqlite_master WHERE type = 'table'").pluck().get()).toBe(6);
+    database.close();
+  });
+
+  it('records and queries cluster events with filtering and limit', () => {
+    const database = new MetadataDatabase();
+    database.recordClusterEvent({
+      eventType: 'NODE_REGISTERED',
+      severity: 'INFO',
+      nodeId: 'node-1',
+      details: { endpoint: 'http://localhost:9001' },
+      createdAt: '2026-10-07T10:00:00.000Z',
+    });
+    database.recordClusterEvent({
+      eventType: 'NODE_UNHEALTHY',
+      severity: 'WARN',
+      nodeId: 'node-1',
+      details: { ageMs: 7000 },
+      createdAt: '2026-10-07T10:01:00.000Z',
+    });
+    database.recordClusterEvent({
+      eventType: 'NODE_UNAVAILABLE',
+      severity: 'ERROR',
+      nodeId: 'node-2',
+      details: 'Node unreachable',
+      createdAt: '2026-10-07T10:02:00.000Z',
+    });
+
+    const allEvents = database.listClusterEvents();
+    expect(allEvents).toHaveLength(3);
+    // Ordered by created_at DESC
+    expect(allEvents[0].event_type).toBe('NODE_UNAVAILABLE');
+    expect(allEvents[0].severity).toBe('ERROR');
+    expect(allEvents[0].node_id).toBe('node-2');
+    expect(allEvents[0].details).toBe('Node unreachable');
+
+    const node1Events = database.listClusterEvents({ nodeId: 'node-1' });
+    expect(node1Events).toHaveLength(2);
+    expect(node1Events[0].event_type).toBe('NODE_UNHEALTHY');
+
+    const errorEvents = database.listClusterEvents({ eventType: 'NODE_UNAVAILABLE' });
+    expect(errorEvents).toHaveLength(1);
+    expect(errorEvents[0].node_id).toBe('node-2');
+
+    const limited = database.listClusterEvents({ limit: 1 });
+    expect(limited).toHaveLength(1);
+    expect(limited[0].event_type).toBe('NODE_UNAVAILABLE');
+
     database.close();
   });
 

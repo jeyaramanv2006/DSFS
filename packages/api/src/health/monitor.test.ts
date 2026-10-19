@@ -71,4 +71,63 @@ describe('storage node health monitor', () => {
     expect(monitor.isStarted()).toBe(false);
     database.close();
   });
+
+  it('records cluster transition events when node state changes', () => {
+    const database = new MetadataDatabase();
+    let now = new Date('2026-10-07T10:00:00.000Z');
+    const monitor = new HealthMonitor(database, () => now, { unhealthyAfterMs: 5000, unavailableAfterMs: 15000 });
+
+    // 1. Initial heartbeat for unknown node -> NODE_REGISTERED
+    monitor.recordHeartbeat({
+      nodeId: 'node-x',
+      endpointUrl: 'http://node-x:9001',
+      totalCapacityBytes: 100,
+      usedCapacityBytes: 10,
+      activeOperations: 0,
+    });
+    let events = database.listClusterEvents({ nodeId: 'node-x' });
+    expect(events).toHaveLength(1);
+    expect(events[0].event_type).toBe('NODE_REGISTERED');
+    expect(events[0].severity).toBe('INFO');
+
+    // 2. Node ages past unhealthy threshold -> NODE_UNHEALTHY
+    now = new Date('2026-10-07T10:00:06.000Z');
+    monitor.refresh();
+    events = database.listClusterEvents({ nodeId: 'node-x' });
+    expect(events).toHaveLength(2);
+    expect(events[0].event_type).toBe('NODE_UNHEALTHY');
+    expect(events[0].severity).toBe('WARN');
+
+    // 3. Node ages past unavailable threshold -> NODE_UNAVAILABLE
+    now = new Date('2026-10-07T10:00:16.000Z');
+    monitor.refresh();
+    events = database.listClusterEvents({ nodeId: 'node-x' });
+    expect(events).toHaveLength(3);
+    expect(events[0].event_type).toBe('NODE_UNAVAILABLE');
+    expect(events[0].severity).toBe('ERROR');
+
+    // 4. Node returns and heartbeats -> NODE_RECOVERED
+    now = new Date('2026-10-07T10:00:20.000Z');
+    monitor.recordHeartbeat({
+      nodeId: 'node-x',
+      endpointUrl: 'http://node-x:9001',
+      totalCapacityBytes: 100,
+      usedCapacityBytes: 10,
+      activeOperations: 0,
+    });
+    events = database.listClusterEvents({ nodeId: 'node-x' });
+    expect(events).toHaveLength(4);
+    expect(events[0].event_type).toBe('NODE_RECOVERED');
+    expect(events[0].severity).toBe('INFO');
+
+    // 5. Rejected heartbeat is recorded
+    now = new Date('2026-10-07T10:00:21.000Z');
+    monitor.recordRejectedHeartbeat({ nodeId: 'node-x', reason: 'ENDPOINT_MISMATCH' });
+    events = database.listClusterEvents({ nodeId: 'node-x' });
+    expect(events).toHaveLength(5);
+    expect(events[0].event_type).toBe('HEARTBEAT_REJECTED');
+    expect(events[0].severity).toBe('WARN');
+
+    database.close();
+  });
 });

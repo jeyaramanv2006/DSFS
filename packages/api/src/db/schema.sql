@@ -68,3 +68,20 @@ CREATE TABLE IF NOT EXISTS chunk_placements (
 
 CREATE INDEX IF NOT EXISTS idx_chunk_placements_node
   ON chunk_placements(node_id);
+
+CREATE TABLE IF NOT EXISTS cluster_events (
+  id TEXT PRIMARY KEY,
+  event_type TEXT NOT NULL,
+  severity TEXT NOT NULL DEFAULT 'INFO',
+  node_id TEXT,
+  file_id TEXT,
+  details TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_cluster_events_created
+  ON cluster_events(created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_cluster_events_node
+  ON cluster_events(node_id, created_at DESC);
+
