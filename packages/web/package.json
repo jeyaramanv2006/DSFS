@@ -8,8 +8,9 @@
     "build": "tsc -p tsconfig.json && vite build"
   },
   "dependencies": {
-    "@voidshare/shared": "0.1.0",
+    "@vitejs/plugin-basic-ssl": "^2.3.0",
     "@vitejs/plugin-react": "latest",
+    "@voidshare/shared": "0.1.0",
     "react": "latest",
     "react-dom": "latest",
     "vite": "latest"

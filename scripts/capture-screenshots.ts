@@ -81,7 +81,7 @@ const CLUSTER_SECRET = 'demo-cluster-secret-key-32-chars!!';
 
 async function main() {
   console.log('Starting screenshot capture automation...');
-  await mkdir(resolve(root, 'docs/assets'), { recursive: true });
+  await mkdir(resolve(root, 'assets'), { recursive: true });
 
   // 1. Storage Nodes
   const store1 = new MemoryStorageNode('node-1');
@@ -236,10 +236,10 @@ async function main() {
   }, 1000);
 
   try {
-    await runScreenshot('http://127.0.0.1:5173/cluster', 'docs/assets/dashboard-overview.png');
-    await runScreenshot('http://127.0.0.1:5173/', 'docs/assets/landing-home.png');
-    await runScreenshot('http://127.0.0.1:5173/send', 'docs/assets/upload-interface.png');
-    await runScreenshot('http://127.0.0.1:5173/download?tab=code', 'docs/assets/retrieval-code.png');
+    await runScreenshot('http://127.0.0.1:5173/cluster', 'assets/dashboard-overview.png');
+    await runScreenshot('http://127.0.0.1:5173/', 'assets/landing-home.png');
+    await runScreenshot('http://127.0.0.1:5173/send', 'assets/upload-interface.png');
+    await runScreenshot('http://127.0.0.1:5173/download?tab=code', 'assets/retrieval-code.png');
     console.log('All screenshots captured successfully!');
   } finally {
     clearInterval(heartbeatTimer);
