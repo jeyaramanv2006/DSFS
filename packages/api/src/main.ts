@@ -1,5 +1,7 @@
 import { mkdir } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { existsSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { MetadataDatabase } from './db/database.js';
 import { buildApiServer } from './server.js';
 import { PlacementService } from './placement/service.js';
@@ -10,6 +12,24 @@ import { HealthMonitor } from './health/monitor.js';
 import { ExpirationSweeper, StorageReconciler } from './cleanup/cleanup.js';
 import { RecoveryService } from './recovery/recovery.js';
 import { BackgroundWorkerManager } from './workers/manager.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+if (typeof process.loadEnvFile === 'function') {
+  for (const candidate of [
+    resolve(process.cwd(), 'packages/api/.env'),
+    resolve(process.cwd(), '.env'),
+    resolve(__dirname, '../.env'),
+  ]) {
+    if (existsSync(candidate)) {
+      try {
+        process.loadEnvFile(candidate);
+        break;
+      } catch {}
+    }
+  }
+}
 
 const databasePath = process.env.DB_PATH ?? './data/api.db';
 await mkdir(dirname(databasePath), { recursive: true });

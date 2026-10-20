@@ -1,5 +1,8 @@
 import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify';
 import { timingSafeEqual } from 'node:crypto';
+import { existsSync } from 'node:fs';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { FilesystemChunkStore, type IStorageNode } from './storage.js';
 import { StorageNodeHeartbeatEmitter } from './heartbeat.js';
 
@@ -166,6 +169,21 @@ export function buildServer(store: IStorageNode, options: StorageServerOptions =
   });
 
   return app;
+}
+
+if (typeof process.loadEnvFile === 'function') {
+  for (const candidate of [
+    resolve(process.cwd(), 'packages/storage-node/.env'),
+    resolve(process.cwd(), '.env'),
+    resolve(dirname(fileURLToPath(import.meta.url)), '../.env'),
+  ]) {
+    if (existsSync(candidate)) {
+      try {
+        process.loadEnvFile(candidate);
+        break;
+      } catch {}
+    }
+  }
 }
 
 const nodeId = process.env.NODE_ID ?? 'node-1';
