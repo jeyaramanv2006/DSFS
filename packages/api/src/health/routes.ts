@@ -57,12 +57,31 @@ export function registerHealthRoutes(
     }
 
     const existingNode = monitor.getStorageNode(body.nodeId);
-    if (existingNode && existingNode.endpoint_url !== body.endpointUrl) {
-      monitor.recordRejectedHeartbeat({ nodeId: body.nodeId, endpointUrl: body.endpointUrl, reason: 'ENDPOINT_MISMATCH' });
-      return reply.code(403).send({ error: 'ENDPOINT_MISMATCH' });
+    let resolvedEndpoint = body.endpointUrl;
+
+    if (existingNode) {
+      const isLocalhostVariant = (url1: string, url2: string) => {
+        try {
+          const u1 = new URL(url1);
+          const u2 = new URL(url2);
+          return u1.port === u2.port && (
+            u1.hostname === 'localhost' || u1.hostname === '127.0.0.1' ||
+            u2.hostname === 'localhost' || u2.hostname === '127.0.0.1'
+          );
+        } catch {
+          return false;
+        }
+      };
+
+      if (existingNode.endpoint_url !== body.endpointUrl && !isLocalhostVariant(existingNode.endpoint_url, body.endpointUrl)) {
+        monitor.recordRejectedHeartbeat({ nodeId: body.nodeId, endpointUrl: body.endpointUrl, reason: 'ENDPOINT_MISMATCH' });
+        return reply.code(403).send({ error: 'ENDPOINT_MISMATCH' });
+      }
+
+      resolvedEndpoint = existingNode.endpoint_url;
     }
 
-    monitor.recordHeartbeat(body);
+    monitor.recordHeartbeat({ ...body, endpointUrl: resolvedEndpoint });
     return reply.code(200).send({ acknowledged: true });
   });
 
