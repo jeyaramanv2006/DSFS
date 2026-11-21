@@ -15,8 +15,9 @@ import {
   type UploadResult,
   type TransferPreview,
 } from './transfer.js';
-import { GradientBars } from '@/components/ui/GradientBars';
-import { ClusterDashboard } from './components/ClusterDashboard';
+import { GradientBars } from './components/ui/GradientBars.js';
+import { ClusterDashboard } from './components/ClusterDashboard.js';
+import { TransferProvider, useTransferState } from './context/TransferContext.js';
 import './styles.css';
 
 type AppMode = 'home' | 'send' | 'download' | 'cluster';
@@ -130,27 +131,29 @@ function App() {
   };
 
   return (
-    <Shell
-      currentMode={mode}
-      onGoHome={() => navigateTo('home', '/')}
-      onGoCluster={() => navigateTo('cluster', '/cluster')}
-    >
-      {mode === 'home' && (
-        <HomeLanding
-          onSelectSend={() => setMode('send')}
-          onSelectDownload={() => setMode('download')}
-          onSelectCluster={() => navigateTo('cluster', '/cluster')}
-        />
-      )}
-      {mode === 'send' && <SendFlow onBackToHome={() => navigateTo('home', '/')} />}
-      {mode === 'download' && (
-        <DownloadFlow
-          initialFileId={pathFileId}
-          onBackToHome={() => navigateTo('home', '/')}
-        />
-      )}
-      {mode === 'cluster' && <ClusterDashboard />}
-    </Shell>
+    <TransferProvider>
+      <Shell
+        currentMode={mode}
+        onGoHome={() => navigateTo('home', '/')}
+        onGoCluster={() => navigateTo('cluster', '/cluster')}
+      >
+        {mode === 'home' && (
+          <HomeLanding
+            onSelectSend={() => setMode('send')}
+            onSelectDownload={() => setMode('download')}
+            onSelectCluster={() => navigateTo('cluster', '/cluster')}
+          />
+        )}
+        {mode === 'send' && <SendFlow onBackToHome={() => navigateTo('home', '/')} />}
+        {mode === 'download' && (
+          <DownloadFlow
+            initialFileId={pathFileId}
+            onBackToHome={() => navigateTo('home', '/')}
+          />
+        )}
+        {mode === 'cluster' && <ClusterDashboard />}
+      </Shell>
+    </TransferProvider>
   );
 }
 
@@ -195,6 +198,7 @@ function Shell({
   onGoHome: () => void;
   onGoCluster: () => void;
 }) {
+  const { transferStatus, currentSweep } = useTransferState();
   return (
     <>
       {/* Background Animated Gradient Bars (React Bits Pro - Midnight Precision) */}
@@ -214,6 +218,8 @@ function Shell({
           backgroundColor="#08090a"
           opacity={0.55}
           vertical
+          transferStatus={transferStatus}
+          sweep={currentSweep}
         />
         <div className="bg-vignette" />
       </div>
@@ -276,6 +282,42 @@ function HomeLanding({
   onSelectDownload: () => void;
   onSelectCluster: () => void;
 }) {
+  const { triggerSweep } = useTransferState();
+  const [activeCard, setActiveCard] = useState<'send' | 'download' | null>(null);
+  const clickTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (clickTimerRef.current !== null) {
+        window.clearTimeout(clickTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleSendClick = (e?: React.MouseEvent | React.KeyboardEvent) => {
+    if (e) e.stopPropagation();
+    if (activeCard !== null) return; // Prevent repeated clicks causing glitches
+
+    setActiveCard('send');
+    triggerSweep('down');
+
+    clickTimerRef.current = window.setTimeout(() => {
+      onSelectSend();
+    }, 700);
+  };
+
+  const handleDownloadClick = (e?: React.MouseEvent | React.KeyboardEvent) => {
+    if (e) e.stopPropagation();
+    if (activeCard !== null) return; // Prevent repeated clicks causing glitches
+
+    setActiveCard('download');
+    triggerSweep('up');
+
+    clickTimerRef.current = window.setTimeout(() => {
+      onSelectDownload();
+    }, 700);
+  };
+
   return (
     <section className="wizard-container">
       <div className="landing-hero">
@@ -291,14 +333,14 @@ function HomeLanding({
         </p>
       </div>
 
-      <div className="intent-grid">
+      <div className={`intent-grid ${activeCard ? 'has-active-card' : ''}`}>
         {/* SENDER — Send a File */}
         <div
-          className="intent-card"
+          className={`intent-card ${activeCard === 'send' ? 'is-active-send' : ''}`}
           role="button"
           tabIndex={0}
-          onClick={onSelectSend}
-          onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onSelectSend()}
+          onClick={handleSendClick}
+          onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && handleSendClick(e)}
         >
           <div className="intent-icon-wrapper">
             <span className="intent-icon">↑</span>
@@ -315,18 +357,22 @@ function HomeLanding({
               <li>Local AES-256-GCM encryption</li>
             </ul>
           </div>
-          <button className="intent-button primary" onClick={onSelectSend}>
+          <button
+            className="intent-button primary"
+            onClick={handleSendClick}
+            tabIndex={-1}
+          >
             Send a File
           </button>
         </div>
 
         {/* RECEIVER — Download a File */}
         <div
-          className="intent-card"
+          className={`intent-card ${activeCard === 'download' ? 'is-active-download' : ''}`}
           role="button"
           tabIndex={0}
-          onClick={onSelectDownload}
-          onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onSelectDownload()}
+          onClick={handleDownloadClick}
+          onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && handleDownloadClick(e)}
         >
           <div className="intent-icon-wrapper download">
             <span className="intent-icon">↓</span>
@@ -343,7 +389,11 @@ function HomeLanding({
               <li>No account or installation</li>
             </ul>
           </div>
-          <button className="intent-button secondary" onClick={onSelectDownload}>
+          <button
+            className="intent-button secondary"
+            onClick={handleDownloadClick}
+            tabIndex={-1}
+          >
             Download a File
           </button>
         </div>
@@ -389,6 +439,7 @@ function HomeLanding({
 
 // 2. SENDER FLOW
 function SendFlow({ onBackToHome }: { onBackToHome: () => void }) {
+  const { startTransfer, updateTransfer, finishTransfer } = useTransferState();
   const [step, setStep] = useState<SendStep>('select');
   const [file, setFile] = useState<File | null>(null);
   const [downloadLimit, setDownloadLimit] = useState<number>(1);
@@ -398,8 +449,18 @@ function SendFlow({ onBackToHome }: { onBackToHome: () => void }) {
   const [error, setError] = useState<{ title: string; message: string; hint?: string } | null>(null);
 
   const abortControllerRef = useRef<AbortController | null>(null);
+  const activeTransferIdRef = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
+
+  useEffect(() => {
+    return () => {
+      if (activeTransferIdRef.current) {
+        finishTransfer(activeTransferIdRef.current, 'aborted');
+        activeTransferIdRef.current = null;
+      }
+    };
+  }, [finishTransfer]);
 
   const handleFileSelect = (selectedFile?: File) => {
     setError(null);
@@ -444,6 +505,10 @@ function SendFlow({ onBackToHome }: { onBackToHome: () => void }) {
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
+    const transferId = `upload-${Date.now()}`;
+    activeTransferIdRef.current = transferId;
+    startTransfer(transferId, 'upload');
+
     try {
       const result = await uploadFile(file, {
         ttlSeconds,
@@ -451,17 +516,24 @@ function SendFlow({ onBackToHome }: { onBackToHome: () => void }) {
         signal: controller.signal,
         onProgress: (progress) => {
           setUploadProgress(progress);
+          updateTransfer(transferId, progress.percent);
         },
       });
 
       setUploadResult(result);
       setStep('result');
+      finishTransfer(transferId, 'completed');
+      activeTransferIdRef.current = null;
     } catch (cause: any) {
       if (cause?.name === 'AbortError' || cause?.message?.includes('aborted')) {
+        finishTransfer(transferId, 'aborted');
+        activeTransferIdRef.current = null;
         setStep('review');
         return;
       }
 
+      finishTransfer(transferId, 'error');
+      activeTransferIdRef.current = null;
       setError({
         title: 'Send Failed',
         message: cause instanceof Error ? cause.message : 'Unable to complete the encrypted transfer.',
@@ -474,6 +546,10 @@ function SendFlow({ onBackToHome }: { onBackToHome: () => void }) {
   };
 
   const cancelUpload = () => {
+    if (activeTransferIdRef.current) {
+      finishTransfer(activeTransferIdRef.current, 'aborted');
+      activeTransferIdRef.current = null;
+    }
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
@@ -482,6 +558,10 @@ function SendFlow({ onBackToHome }: { onBackToHome: () => void }) {
   };
 
   const resetAll = () => {
+    if (activeTransferIdRef.current) {
+      finishTransfer(activeTransferIdRef.current, 'aborted');
+      activeTransferIdRef.current = null;
+    }
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
@@ -958,6 +1038,7 @@ function DownloadFlow({
   initialFileId: string | null;
   onBackToHome: () => void;
 }) {
+  const { startTransfer, updateTransfer, finishTransfer } = useTransferState();
   const initialSecret = typeof window !== 'undefined' ? window.location.hash.slice(1) : '';
   const [entryTab, setEntryTab] = useState<'link' | 'code'>(
     typeof window !== 'undefined' && window.location.search.includes('tab=code') ? 'code' : 'link',
@@ -976,6 +1057,16 @@ function DownloadFlow({
   const [progress, setProgress] = useState<DownloadProgress | null>(null);
   const [downloadedFileName, setDownloadedFileName] = useState<string>('');
   const [errorDetails, setErrorDetails] = useState<{ title: string; message: string; hint?: string } | null>(null);
+  const activeDownloadIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (activeDownloadIdRef.current) {
+        finishTransfer(activeDownloadIdRef.current, 'aborted');
+        activeDownloadIdRef.current = null;
+      }
+    };
+  }, [finishTransfer]);
 
   // Automatically resolve preview if loaded with direct URL
   useEffect(() => {
@@ -1102,9 +1193,16 @@ function DownloadFlow({
     setStep('busy');
     setErrorDetails(null);
 
+    const transferId = `download-${activeFileId}-${Date.now()}`;
+    activeDownloadIdRef.current = transferId;
+    startTransfer(transferId, 'download');
+
     try {
       const result = await downloadFile(activeFileId, activeSecret, {
-        onProgress: (p) => setProgress(p),
+        onProgress: (p) => {
+          setProgress(p);
+          updateTransfer(transferId, p.percent);
+        },
       });
 
       const name = result.encryptedFileName
@@ -1120,8 +1218,12 @@ function DownloadFlow({
       anchor.click();
       URL.revokeObjectURL(anchor.href);
 
+      finishTransfer(transferId, 'completed');
+      activeDownloadIdRef.current = null;
       setStep('done');
     } catch (cause: any) {
+      finishTransfer(transferId, 'error');
+      activeDownloadIdRef.current = null;
       setStep('error');
       const msg = cause instanceof Error ? cause.message : 'The download could not be completed.';
       

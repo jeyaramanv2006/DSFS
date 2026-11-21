@@ -240,13 +240,33 @@ input:focus-visible {
   display: flex;
   flex-direction: column;
   cursor: pointer;
-  transition: border-color 0.15s ease, background-color 0.15s ease;
+  transition: border-color 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+              background-color 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+              transform 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 0.35s cubic-bezier(0.16, 1, 0.3, 1);
   text-align: left;
+  will-change: transform, border-color, box-shadow;
 }
 
 .intent-card:hover {
   border-color: var(--border-subtle);
   background-color: var(--surface-elevated);
+}
+
+/* Card click active animation states */
+.intent-card.is-active-send,
+.intent-card.is-active-download {
+  border-color: var(--accent-lime);
+  background-color: var(--surface-elevated);
+  transform: translateY(-4px);
+  box-shadow: 0 0 0 1px rgba(228, 242, 34, 0.32),
+              0 14px 36px -8px rgba(0, 0, 0, 0.65),
+              0 0 24px rgba(228, 242, 34, 0.1);
+}
+
+.intent-grid.has-active-card .intent-card:not(.is-active-send):not(.is-active-download) {
+  opacity: 0.72;
+  transition: opacity 0.35s ease;
 }
 
 .intent-icon-wrapper {
@@ -258,11 +278,33 @@ input:focus-visible {
   display: grid;
   place-items: center;
   margin-bottom: 24px;
+  transition: border-color 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+              background-color 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.intent-card.is-active-send .intent-icon-wrapper,
+.intent-card.is-active-download .intent-icon-wrapper {
+  border-color: rgba(228, 242, 34, 0.5);
+  background: rgba(228, 242, 34, 0.08);
 }
 
 .intent-icon {
   font-size: 1.15rem;
   color: var(--text-primary);
+  display: inline-block;
+  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), color 0.25s ease;
+}
+
+/* Arrow micro-movements on click */
+.intent-card.is-active-send .intent-icon {
+  transform: translateY(-4px);
+  color: var(--accent-lime);
+}
+
+.intent-card.is-active-download .intent-icon {
+  transform: translateY(4px);
+  color: var(--accent-lime);
 }
 
 .intent-icon-wrapper.download .intent-icon {
@@ -2401,4 +2443,21 @@ input:focus-visible {
   color: var(--text-secondary);
 }
 
-
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .intent-card.is-active-send,
+  .intent-card.is-active-download {
+    transform: none !important;
+  }
+  .intent-card.is-active-send .intent-icon,
+  .intent-card.is-active-download .intent-icon {
+    transform: none !important;
+  }
+}
